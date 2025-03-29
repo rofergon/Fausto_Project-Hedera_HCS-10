@@ -180,4 +180,4 @@ Contributions are welcome! Please open an issue or submit a pull request. (Add m
 
 ## License
 
-This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details (You may need to add a LICENSE file). 
+This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details. 
