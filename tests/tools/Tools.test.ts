@@ -1,8 +1,11 @@
 // tests/tools/Tools.test.ts
 
-import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool";
-import { SendMessageTool } from "../../src/tools/SendMessageTool";
-import { HCS10Client } from "../../src/hcs10/HCS10Client";
+import * as dotenv from "dotenv";
+dotenv.config();
+import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool.js";
+import { SendMessageTool } from "../../src/tools/SendMessageTool.js";
+import { HCS10Client } from "../../src/hcs10/HCS10Client.js";
+import { z } from "zod";
 
 describe("LangChain Tools", () => {
     let mockHCS10Client: HCS10Client;

@@ -1,9 +1,9 @@
-import { HCS10Client } from "../hcs10/HCS10Client";
+import { HCS10Client } from "../hcs10/HCS10Client.js";
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 // Import FeeConfigBuilder if needed for explicit fee handling
 // import { FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
-import { Logger } from '../utils/logger'; // Assuming a logger utility exists
+import { Logger } from '../utils/logger.js'; // Added .js // Assuming a logger utility exists
 
 /**
  * ConnectionTool monitors an agent's inbound topic for connection requests

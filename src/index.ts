@@ -1,10 +1,10 @@
 // src/index.ts
 
-import { createHederaClient } from "./utils/HederaClient";
-import { HCS10Client } from "./hcs10/HCS10Client";
-import { RegisterAgentTool } from "./tools/RegisterAgentTool";
-import { SendMessageTool } from "./tools/SendMessageTool";
-import { ConnectionTool } from "./tools/ConnectionTool";
+import { createHederaClient } from "./utils/HederaClient.js";
+import { HCS10Client } from "./hcs10/HCS10Client.js";
+import { RegisterAgentTool } from "./tools/RegisterAgentTool.js";
+import { SendMessageTool } from "./tools/SendMessageTool.js";
+import { ConnectionTool } from "./tools/ConnectionTool.js";
 
 /**
  * Initializes the HCS10 client and returns pre-registered LangChain tools.
@@ -48,7 +48,7 @@ export async function initializeHCS10Client(options?: { useEncryption?: boolean,
     };
 }
 
-export * from "./hcs10/HCS10Client";
-export * from "./tools/RegisterAgentTool";
-export * from "./tools/SendMessageTool";
-export * from "./tools/ConnectionTool";
+export * from "./hcs10/HCS10Client.js";
+export * from "./tools/RegisterAgentTool.js";
+export * from "./tools/SendMessageTool.js";
+export * from "./tools/ConnectionTool.js";

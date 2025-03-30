@@ -1,7 +1,7 @@
 // src/tools/RegisterAgentTool.ts
 
-import { HCS10Client } from "../hcs10/HCS10Client";
-import { AgentMetadata } from "../hcs10/types";
+import { HCS10Client } from "../hcs10/HCS10Client.js";
+import { AgentMetadata } from "../hcs10/types.js";
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 

@@ -1,10 +1,15 @@
 // tests/hcs10/HCS10Client.test.ts
 
-import { HCS10Client } from "../../src/hcs10/HCS10Client";
+import * as dotenv from "dotenv";
+dotenv.config();
+import { HCS10Client } from "../../src/hcs10/HCS10Client.js";
 import { TopicCreateTransaction, TopicMessageSubmitTransaction } from "@hashgraph/sdk";
 import { PrivateKey } from "@hashgraph/sdk";
 import { Client } from "@hashgraph/sdk";
-import { AgentMetadata } from "../../src/hcs10/types";
+import { AgentMetadata } from "../../src/hcs10/types.js";
+import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool.js";
+import { SendMessageTool } from "../../src/tools/SendMessageTool.js";
+import { ConnectionTool } from "../../src/tools/ConnectionTool.js";
 
 // Mocking the Hedera SDK's TopicCreateTransaction execute method.
 jest.mock("@hashgraph/sdk", () => {

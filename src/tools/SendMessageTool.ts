@@ -1,6 +1,6 @@
 // src/tools/SendMessageTool.ts
 
-import { HCS10Client } from "../hcs10/HCS10Client";
+import { HCS10Client } from "../hcs10/HCS10Client.js";
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import * as crypto from 'crypto';

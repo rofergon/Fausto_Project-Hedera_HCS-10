@@ -2,14 +2,20 @@
     "name": "hashgraph-online-agent-kit",
     "version": "1.0.0",
     "description": "A toolkit for building online agents on the Hedera Hashgraph network",
-    "main": "dist/index.js",
+    "type": "module",
+    "main": "./dist/index.es.js",
     "types": "dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
     "scripts": {
-        "build": "tsc",
+        "build": "vite build",
         "test": "jest",
         "lint": "eslint . --ext .ts",
         "prepare": "npm run build",
-        "cli-demo": "node -r tsconfig-paths/register -r ts-node/register examples/cli-demo.ts"
+        "cli-demo": "tsx examples/cli-demo.ts",
+        "interactive-demo": "tsx examples/interactive-demo.ts",
+        "langchain-demo": "tsx examples/langchain-demo.ts"
     },
     "keywords": [
         "hedera",
@@ -22,7 +28,7 @@
     "license": "Apache-2.0",
     "dependencies": {
         "@hashgraph/sdk": "^2.39.0",
-        "@hashgraphonline/standards-sdk": "^0.0.46",
+        "@hashgraphonline/standards-sdk": "^0.0.50",
         "@langchain/community": "^0.3.37",
         "@langchain/openai": "^0.5.1",
         "dotenv": "^16.4.1",
@@ -40,6 +46,9 @@
         "jest": "^29.7.0",
         "ts-jest": "^29.1.2",
         "ts-node": "^10.9.2",
-        "tsconfig-paths": "^4.2.0"
+        "tsconfig-paths": "^4.2.0",
+        "tsx": "^4.19.3",
+        "vite": "^6.2.3",
+        "vite-plugin-dts": "^4.5.3"
     }
 }
