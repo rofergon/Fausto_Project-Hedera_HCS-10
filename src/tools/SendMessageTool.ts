@@ -1,6 +1,6 @@
 // src/tools/SendMessageTool.ts
 
-import { HCS10Client } from "../hcs10/HCS10Client.js";
+import { HCS10Client } from "../hcs10/HCS10Client";
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import * as crypto from 'crypto';
@@ -43,6 +43,7 @@ export class SendMessageTool extends StructuredTool {
                 ...(input.dataset && { dataset: input.dataset })
             };
 
+            const accountId = this.client.getOperatorId();
             await this.client.sendMessage(input.topicId, JSON.stringify(messageData));
             const response = await this.monitorResponses(input.topicId, messageData.requestId);
 
