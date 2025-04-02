@@ -10,7 +10,7 @@
     ],
     "scripts": {
         "build": "vite build",
-        "test": "jest",
+        "test": "NODE_OPTIONS=--experimental-vm-modules jest",
         "lint": "eslint . --ext .ts",
         "prepare": "npm run build",
         "cli-demo": "tsx examples/cli-demo.ts",

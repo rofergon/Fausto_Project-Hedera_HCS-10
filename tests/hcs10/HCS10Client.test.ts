@@ -2,18 +2,19 @@
 
 import * as dotenv from "dotenv";
 dotenv.config();
-import { HCS10Client } from "../../src/hcs10/HCS10Client.js";
+import { jest, describe, test, expect, beforeEach } from '@jest/globals';
+import { HCS10Client } from "../../src/hcs10/HCS10Client";
 import { TopicCreateTransaction, TopicMessageSubmitTransaction } from "@hashgraph/sdk";
 import { PrivateKey } from "@hashgraph/sdk";
 import { Client } from "@hashgraph/sdk";
-import { AgentMetadata } from "../../src/hcs10/types.js";
-import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool.js";
-import { SendMessageTool } from "../../src/tools/SendMessageTool.js";
-import { ConnectionTool } from "../../src/tools/ConnectionTool.js";
+import { AgentMetadata } from "../../src/hcs10/types";
+import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool";
+import { SendMessageTool } from "../../src/tools/SendMessageTool";
+import { ConnectionTool } from "../../src/tools/ConnectionTool";
 
 // Mocking the Hedera SDK's TopicCreateTransaction execute method.
 jest.mock("@hashgraph/sdk", () => {
-    const originalModule = jest.requireActual("@hashgraph/sdk");
+    const originalModule = jest.requireActual("@hashgraph/sdk") as Record<string, any>;
     return {
         ...originalModule,
         TopicCreateTransaction: class {
@@ -91,8 +92,8 @@ describe("HCS10Client", () => {
             }
             // Add other expected fields from the standard SDK result
         };
-        const mockStandardClient = hcsClient['standardClient'] as any; // Access private member for mocking
-        mockStandardClient.createAndRegisterAgent = jest.fn().mockResolvedValue(mockResult);
+        const mockStandardClient = hcsClient['standardClient'] as any;
+        mockStandardClient.createAndRegisterAgent = jest.fn<() => Promise<any>>().mockResolvedValue(mockResult);
 
         const result = await hcsClient.createAndRegisterAgent(metadata);
 

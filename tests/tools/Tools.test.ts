@@ -2,23 +2,28 @@
 
 import * as dotenv from "dotenv";
 dotenv.config();
-import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool.js";
-import { SendMessageTool } from "../../src/tools/SendMessageTool.js";
-import { HCS10Client } from "../../src/hcs10/HCS10Client.js";
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { RegisterAgentTool } from "../../src/tools/RegisterAgentTool";
+import { SendMessageTool } from "../../src/tools/SendMessageTool";
+import { HCS10Client } from "../../src/hcs10/HCS10Client";
 import { z } from "zod";
+import { PrivateKey } from "@hashgraph/sdk";
 
 describe("LangChain Tools", () => {
     let mockHCS10Client: HCS10Client;
 
     beforeEach(() => {
-        // Setup mock HCS10Client
-        // Use the actual constructor signature for type safety, then mock methods
-        mockHCS10Client = new HCS10Client("dummyOpId", "dummyPKey", "testnet");
-        // Mock necessary methods used by the tools
-        mockHCS10Client.createAndRegisterAgent = jest.fn().mockResolvedValue({ metadata: { accountId: '1', inboundTopicId: '2', outboundTopicId: '3' } });
-        mockHCS10Client.sendMessage = jest.fn().mockResolvedValue("SUCCESS");
-        mockHCS10Client.getMessages = jest.fn().mockResolvedValue({ messages: [] }); // Mock response for monitorResponses
-        mockHCS10Client.getMessageContent = jest.fn().mockResolvedValue("Resolved Content");
+        // Generate a valid dummy private key string in the recommended format
+        const dummyPrivateKeyString = PrivateKey.generateED25519().toString();
+
+        // Setup mock HCS10Client with the dummy key
+        mockHCS10Client = new HCS10Client("0.0.12345", dummyPrivateKeyString, "testnet");
+
+        // Mock necessary methods used by the tools - Use imported jest and add type hints
+        mockHCS10Client.createAndRegisterAgent = jest.fn<() => Promise<any>>().mockResolvedValue({ metadata: { accountId: '1', inboundTopicId: '2', outboundTopicId: '3' } });
+        mockHCS10Client.sendMessage = jest.fn<() => Promise<string>>().mockResolvedValue("SUCCESS");
+        mockHCS10Client.getMessages = jest.fn<() => Promise<any>>().mockResolvedValue({ messages: [] });
+        mockHCS10Client.getMessageContent = jest.fn<() => Promise<string>>().mockResolvedValue("Resolved Content");
     });
 
     describe("RegisterAgentTool", () => {
@@ -30,9 +35,9 @@ describe("LangChain Tools", () => {
             expect(mockHCS10Client.createAndRegisterAgent).toHaveBeenCalledWith(input);
         });
 
-        // Add tests for error cases, e.g., if createAndRegisterAgent rejects
         it("should handle registration failure", async () => {
-            mockHCS10Client.createAndRegisterAgent = jest.fn().mockRejectedValue(new Error("Registration failed"));
+            // Use imported jest and add type hint
+            mockHCS10Client.createAndRegisterAgent = jest.fn<() => Promise<any>>().mockRejectedValue(new Error("Registration failed"));
             const tool = new RegisterAgentTool(mockHCS10Client);
             const input = { name: "Fail Agent" };
             await expect(tool._call(input)).rejects.toThrow("Failed to create/register agent: Registration failed");
@@ -49,7 +54,8 @@ describe("LangChain Tools", () => {
         });
 
         it("should handle message sending failure", async () => {
-            mockHCS10Client.sendMessage = jest.fn().mockRejectedValue(new Error("Send failed"));
+            // Use imported jest and add type hint
+            mockHCS10Client.sendMessage = jest.fn<() => Promise<string>>().mockRejectedValue(new Error("Send failed"));
             const tool = new SendMessageTool(mockHCS10Client);
             const input = { topicId: "0.0.123", message: "Fail message" };
             await expect(tool._call(input)).rejects.toThrow("Failed to send message: Send failed");

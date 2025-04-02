@@ -12,8 +12,8 @@ import {
     AIAgentCapability as StandardAIAgentCapability
 } from '@hashgraphonline/standards-sdk';
 
-import { AgentMetadata, AgentChannels } from "./types.js";
-import { encryptMessage } from "../utils/Encryption.js";
+import { AgentMetadata, AgentChannels } from "./types";
+import { encryptMessage } from "../utils/Encryption";
 
 // Add pfp details to AgentMetadata type definition
 export interface ExtendedAgentMetadata extends AgentMetadata {
@@ -26,8 +26,8 @@ type StandardHandleConnectionRequest = InstanceType<typeof StandardSDKClient>['h
 // Infer FeeConfigBuilderInterface and HandleConnectionRequestResponse using Parameters/Awaited utility types
 type FeeConfigBuilderInterface = Parameters<StandardHandleConnectionRequest>[3];
 type HandleConnectionRequestResponse = Awaited<ReturnType<StandardHandleConnectionRequest>>;
-// Define the stricter NetworkType expected by the standard SDK
-type StandardNetworkType = 'mainnet' | 'testnet';
+// Define AND EXPORT the stricter NetworkType expected by the standard SDK
+export type StandardNetworkType = 'mainnet' | 'testnet';
 
 /**
  * HCS10Client wraps the HCS-10 functionalities using the @hashgraphonline/standards-sdk.

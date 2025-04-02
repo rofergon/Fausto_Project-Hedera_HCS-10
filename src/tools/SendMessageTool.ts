@@ -43,7 +43,9 @@ export class SendMessageTool extends StructuredTool {
                 ...(input.dataset && { dataset: input.dataset })
             };
 
-            await this.client.sendMessage(input.topicId, JSON.stringify(messageData));
+            // Add required operatorId argument (using a placeholder)
+            const placeholderOperatorId = "sender-topic@sender-account";
+            await this.client.sendMessage(input.topicId, placeholderOperatorId, JSON.stringify(messageData));
             const response = await this.monitorResponses(input.topicId, messageData.requestId);
 
             return `Successfully sent message to topic ${input.topicId}${response ? `\nResponse: ${response}` : ''}`;

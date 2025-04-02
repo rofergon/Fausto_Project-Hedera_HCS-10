@@ -4,6 +4,7 @@ import { HCS10Client } from "../hcs10/HCS10Client.js";
 import { AgentMetadata } from "../hcs10/types.js";
 import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
+import { RegisteredAgent } from "../demo-state.js";
 
 /**
  * RegisterAgentTool wraps the createAndRegisterAgent() function of HCS10Client.
@@ -31,8 +32,9 @@ export class RegisterAgentTool extends StructuredTool {
 
     /**
      * Calls createAndRegisterAgent() with the provided metadata.
+     * Returns the details of the registered agent.
      */
-    async _call(input: z.infer<typeof this.schema>): Promise<string> {
+    async _call(input: z.infer<typeof this.schema>): Promise<RegisteredAgent | string> {
         const metadata: AgentMetadata = {
             name: input.name,
             description: input.description,
@@ -43,13 +45,25 @@ export class RegisterAgentTool extends StructuredTool {
         try {
             const result = await this.client.createAndRegisterAgent(metadata);
 
-            const accountId = result?.metadata?.accountId || 'unknown';
-            const inboundTopicId = result?.metadata?.inboundTopicId || 'unknown';
-            const outboundTopicId = result?.metadata?.outboundTopicId || 'unknown';
+            const accountId = result?.metadata?.accountId;
+            const inboundTopicId = result?.metadata?.inboundTopicId;
+            const outboundTopicId = result?.metadata?.outboundTopicId;
+            const profileTopicId = result?.metadata?.profileTopicId;
 
-            return `Successfully created and registered agent "${input.name}". Account: ${accountId}, Inbound Topic: ${inboundTopicId}, Outbound Topic: ${outboundTopicId}`;
+            if (!accountId || !inboundTopicId || !outboundTopicId) {
+                return "Error: Registration failed. The HCS client returned incomplete details.";
+            }
+
+            const registeredAgent: RegisteredAgent = {
+                name: input.name,
+                accountId: accountId,
+                inboundTopicId: inboundTopicId,
+                outboundTopicId: outboundTopicId,
+                profileTopicId: profileTopicId
+            };
+            return registeredAgent;
         } catch (error) {
-            throw new Error(`Failed to create/register agent: ${error instanceof Error ? error.message : String(error)}`);
+            return `Error: Failed to create/register agent "${input.name}". Reason: ${error instanceof Error ? error.message : String(error)}`;
         }
     }
 }
