@@ -45,11 +45,12 @@ export type StandardNetworkType = 'mainnet' | 'testnet';
  */
 export class HCS10Client {
   // Use the standard SDK's client type via alias
-  private standardClient: StandardSDKClient;
+  public standardClient: StandardSDKClient;
   private useEncryption: boolean;
 
   // Note: AgentChannels might become redundant if standardClient manages them internally
   public agentChannels?: AgentChannels;
+  public guardedRegistryBaseUrl: string;
 
   // Updated constructor to take operator details directly
   constructor(
@@ -68,6 +69,7 @@ export class HCS10Client {
       guardedRegistryBaseUrl: options?.registryUrl,
       // Add other necessary config options based on StandardSDKClient constructor if needed
     });
+    this.guardedRegistryBaseUrl = options?.registryUrl || '';
     this.useEncryption = options?.useEncryption || false;
   }
 
@@ -356,5 +358,61 @@ export class HCS10Client {
         }`
       );
     }
+  }
+
+  /**
+   * Retrieves the inbound topic ID associated with the current operator.
+   * This typically involves fetching the operator's own HCS-10 profile.
+   * @returns A promise that resolves to the operator's inbound topic ID.
+   * @throws {Error} If the operator ID cannot be determined or the profile/topic cannot be retrieved.
+   */
+  public async getInboundTopicId(): Promise<string> {
+    try {
+      const operatorId = this.getOperatorId();
+      console.log(
+        `[HCS10Client] Retrieving profile for operator ${operatorId} to find inbound topic...`
+      );
+      const profileResponse = await this.retrieveProfile(operatorId);
+      if (profileResponse.success && profileResponse.topicInfo?.inboundTopic) {
+        console.log(
+          `[HCS10Client] Found inbound topic for operator ${operatorId}: ${profileResponse.topicInfo.inboundTopic}`
+        );
+        return profileResponse.topicInfo.inboundTopic;
+      } else {
+        throw new Error(
+          `Could not retrieve inbound topic from profile for ${operatorId}. Profile success: ${profileResponse.success}, Error: ${profileResponse.error}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[HCS10Client] Error fetching operator's inbound topic ID (${this.getOperatorId()}):`,
+        error
+      );
+      // Construct a more user-friendly error message
+      const operatorId = this.getOperatorId(); // Get operator ID again for the message
+      let detailedMessage = `Failed to get inbound topic ID for operator ${operatorId}.`;
+      if (
+        error instanceof Error &&
+        error.message.includes('does not have a valid HCS-11 memo')
+      ) {
+        detailedMessage += ` The account profile may not exist or is invalid. Please ensure this operator account (${operatorId}) is registered as an HCS-10 agent. You might need to register it first (e.g., using the 'register_agent' tool or SDK function).`;
+      } else if (error instanceof Error) {
+        detailedMessage += ` Reason: ${error.message}`;
+      } else {
+        detailedMessage += ` Unexpected error: ${String(error)}`;
+      }
+      // Rethrow with the improved message
+      throw new Error(detailedMessage);
+    }
+  }
+
+  public setClient(accountId: string, privateKey: string): StandardSDKClient {
+    this.standardClient = new StandardSDKClient({
+      network: this.getNetwork(),
+      operatorId: accountId,
+      operatorPrivateKey: privateKey,
+      guardedRegistryBaseUrl: this.guardedRegistryBaseUrl,
+    });
+    return this.standardClient;
   }
 }

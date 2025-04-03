@@ -6,6 +6,8 @@ import readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { updateEnvFile } from './utils';
+import { ENV_FILE_PATH } from './utils';
 
 dotenv.config();
 
@@ -157,6 +159,13 @@ async function registerNewAgent() {
       profileTopicId: result.metadata.profileTopicId,
       operatorPrivateKey: result.metadata.privateKey,
     };
+
+    await updateEnvFile(ENV_FILE_PATH, {
+      TODD_ACCOUNT_ID: result?.metadata?.accountId,
+      TODD_PRIVATE_KEY: result?.metadata?.privateKey,
+      TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
+      TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
+    });
 
     registeredAgents.push(newAgent);
     console.log('\nRegistration Successful!');
@@ -645,6 +654,51 @@ async function main() {
     hcsClient = initResult.hcs10Client;
     connectionTool = initResult.tools.connectionTool;
     console.log('Client initialized successfully.');
+
+    const toddAccountId = process.env.TODD_ACCOUNT_ID;
+    const toddPrivateKey = process.env.TODD_PRIVATE_KEY;
+    const toddInboundTopicId = process.env.TODD_INBOUND_TOPIC_ID;
+    const toddOutboundTopicId = process.env.TODD_OUTBOUND_TOPIC_ID;
+    const toddProfileTopicId = process.env.TODD_PROFILE_TOPIC_ID; // Optional
+
+    if (
+      toddAccountId &&
+      toddPrivateKey &&
+      toddInboundTopicId &&
+      toddOutboundTopicId
+    ) {
+      console.log(
+        'Found Todd agent details in environment variables. Setting as active agent...'
+      );
+      const toddAgent: RegisteredAgent = {
+        name: 'Todd (from env)',
+        accountId: toddAccountId,
+        inboundTopicId: toddInboundTopicId,
+        outboundTopicId: toddOutboundTopicId,
+        profileTopicId: toddProfileTopicId,
+        operatorPrivateKey: toddPrivateKey,
+      };
+
+      registeredAgents.push(toddAgent);
+      currentAgent = toddAgent;
+
+      hcsClient = new HCS10Client(
+        currentAgent.accountId,
+        currentAgent.operatorPrivateKey,
+        hcsClient.getNetwork(),
+        {
+          useEncryption: false,
+          registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+        }
+      );
+      console.log(`Client reconfigured for active agent: ${currentAgent.name}`);
+    } else {
+      console.log(
+        'Todd agent details not found in environment variables. Register or select an agent manually.'
+      );
+    }
+    // ---> END ADDITION
+
     await showMenu();
   } catch (error) {
     console.error('Failed to initialize HCS10 client:', error);
