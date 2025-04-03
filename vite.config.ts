@@ -13,6 +13,12 @@ export default defineConfig({
     },
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      external: ['fs', 'path', 'url', 'crypto'],
+      input: {
+        main: path.resolve(__dirname, 'src/index.ts'),
+      },
+    },
   },
   plugins: [
     dts({
