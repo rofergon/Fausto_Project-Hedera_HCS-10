@@ -22,6 +22,7 @@ import {
   MessagesPlaceholder,
 } from '@langchain/core/prompts';
 import { StructuredToolInterface } from '@langchain/core/tools';
+import { HCS11Profile, ProfileResponse } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
@@ -94,12 +95,12 @@ async function initialize() {
         process.env.TODD_ACCOUNT_ID,
         process.env.TODD_PRIVATE_KEY
       );
-      const toddProfile = await hcsClient.retrieveProfile(
+      const toddProfile = (await hcsClient.retrieveProfile(
         process.env.TODD_ACCOUNT_ID
-      );
+      )) as ProfileResponse;
       if (toddProfile.success && toddProfile.topicInfo) {
         stateManager.setCurrentAgent({
-          name: toddProfile.profile.name,
+          name: (toddProfile.profile as HCS11Profile).display_name,
           accountId: process.env.TODD_ACCOUNT_ID,
           inboundTopicId: toddProfile.topicInfo.inboundTopic,
           outboundTopicId: toddProfile.topicInfo.outboundTopic,

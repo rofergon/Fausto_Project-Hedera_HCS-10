@@ -89,9 +89,9 @@ export async function ensureAgentHasEnoughHbar(
               );
 
               const fundTxResponse = await transferTx.execute(
-                baseClient.getClient()
+                baseClient.getClient() as any
               );
-              await fundTxResponse.getReceipt(baseClient.getClient());
+              await fundTxResponse.getReceipt(baseClient.getClient() as any);
               logger.info(
                 `Successfully funded ${agentName} account ${accountId}.`
               );

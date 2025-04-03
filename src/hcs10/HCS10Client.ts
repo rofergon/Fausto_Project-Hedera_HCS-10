@@ -147,7 +147,7 @@ export class HCS10Client {
     // Assuming standardClient has a submitConnectionRequest that returns a receipt or similar.
     // If not, this needs refactoring to build the payload and use submitPayload.
     // Let's *assume* for now it exists and returns a receipt for the first message submission.
-    return this.standardClient.submitConnectionRequest(inboundTopicId, memo);
+    return this.standardClient.submitConnectionRequest(inboundTopicId, memo) as any; // Type cast to resolve SDK version conflicts
   }
 
   /**
@@ -281,7 +281,7 @@ export class HCS10Client {
         topicId,
         data,
         memo,
-        submitKey
+        submitKey as any // Type cast to avoid SDK version conflicts
       );
       return messageResponse.status.toString();
     } catch (error) {
