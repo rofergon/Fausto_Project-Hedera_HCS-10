@@ -2,7 +2,7 @@
 # Each line is a file pattern followed by one or more owners
 
 # These owners will be the default owners for everything in the repo
-* @kantorcodes @HGraphPunks @3nigma @victorholo @vla-dev @rocketmay
+@kantorcodes @HGraphPunks @3nigma @victorholo @vla-dev @rocketmay
 
 # Specific directories or files can have different owners
 # Examples:
