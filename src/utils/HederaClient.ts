@@ -1,7 +1,7 @@
 // src/utils/HederaClient.ts
-import { Client, AccountId, PrivateKey, TopicMessage, TopicMessageQuery } from "@hashgraph/sdk";
+import { Client, AccountId, PrivateKey, TopicMessage, TopicMessageQuery } from '@hashgraph/sdk';
 import * as dotenv from 'dotenv';
-import { HCS10Message } from '../hcs10/types.js';
+import { HCS10Message } from '../hcs10/types';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -10,12 +10,12 @@ dotenv.config();
  * Creates and returns a Hedera Client based on environment variables.
  */
 export function createHederaClient(): Client {
-    const network = process.env.HEDERA_NETWORK || "testnet";
+    const network = process.env.HEDERA_NETWORK || 'testnet';
     const operatorId = process.env.HEDERA_OPERATOR_ID;
     const operatorKey = process.env.HEDERA_OPERATOR_KEY;
 
     if (!operatorId || !operatorKey) {
-        throw new Error("HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY must be set in env.");
+        throw new Error('HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY must be set in env.');
     }
 
     const client = Client.forName(network);

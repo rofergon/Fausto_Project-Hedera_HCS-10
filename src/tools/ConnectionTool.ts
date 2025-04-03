@@ -1,19 +1,27 @@
-import { HCS10Client } from "../hcs10/HCS10Client.js";
-import { StructuredTool } from "@langchain/core/tools";
-import { z } from "zod";
+import { HCS10Client } from '../hcs10/HCS10Client';
+import { StructuredTool, ToolParams } from '@langchain/core/tools';
+import { z } from 'zod';
 // Import FeeConfigBuilder if needed for explicit fee handling
 // import { FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
-import { Logger } from '../utils/logger.js'; // Added .js // Assuming a logger utility exists
+import { Logger } from '@hashgraphonline/standards-sdk';
+import { DemoState, ActiveConnection } from '../demo-state'; // Import DemoState and ActiveConnection
+
+// Add demoState to params
+export interface ConnectionToolParams extends ToolParams {
+    client: HCS10Client;
+    demoState: DemoState;
+}
 
 /**
  * ConnectionTool monitors an agent's inbound topic for connection requests
  * and automatically handles them using the HCS-10 standard SDK flow.
  */
 export class ConnectionTool extends StructuredTool {
-    name = "monitor_connections";
+    name = 'monitor_connections';
     description = "Starts monitoring an agent's inbound topic for HCS-10 connection requests and handles them automatically.";
     private client: HCS10Client;
     private logger: Logger;
+    private demoState: DemoState; // Added demoState property
     private isMonitoring: boolean = false; // Flag to prevent multiple monitors
     private monitoringTopic: string | null = null;
 
@@ -23,12 +31,13 @@ export class ConnectionTool extends StructuredTool {
     });
 
     /**
-     * @param client - Instance of HCS10Client (already configured with operator/network).
+     * @param client - Instance of HCS10Client.
+     * @param demoState - Instance of DemoState for shared state management.
      */
-    constructor(client: HCS10Client) {
-        super();
+    constructor({ client, demoState, ...rest }: ConnectionToolParams) { // Updated constructor signature
+        super(rest);
         this.client = client;
-        // Initialize logger (adjust module name as needed)
+        this.demoState = demoState; // Store demoState
         this.logger = Logger.getInstance({ module: 'ConnectionTool', level: 'info' });
     }
 
@@ -70,15 +79,8 @@ export class ConnectionTool extends StructuredTool {
 
         let lastProcessedMessageSequence = 0;
         const processedRequestIds = new Set<number>(); // Track processed requests within this monitoring session
-        const operatorAccountId = this.client.getOperatorId(); // Use the public getter
-
-        if (!operatorAccountId) {
-            // This check might be redundant if getOperatorId throws, but kept for safety
-            throw new Error('Operator account ID is not available from the HCS10Client instance.');
-        }
 
         // Main monitoring loop
-        // TODO: Consider adding a condition to stop this loop if needed.
         while (this.isMonitoring && this.monitoringTopic === inboundTopicId) {
             try {
                 const messagesResult = await this.client.getMessages(inboundTopicId);
@@ -115,22 +117,30 @@ export class ConnectionTool extends StructuredTool {
                     this.logger.info(`Processing connection request #${connectionRequestId} from account ${requestingAccountId}...`);
 
                     try {
-                        // Handle the connection request using the standard SDK client
-                        // Fee configuration can be added here if needed, e.g.:
-                        // const feeConfig = FeeConfigBuilder.forHbar(1, operatorAccountId);
+                        // Handle the connection request using the HCS10Client wrapper
                         const confirmation = await this.client.handleConnectionRequest(
                             inboundTopicId,
                             requestingAccountId,
                             connectionRequestId
-                            // feeConfig // Pass fee config if used
                         );
 
                         processedRequestIds.add(connectionRequestId);
-                        this.logger.info(`Connection confirmed for request #${connectionRequestId}. New connection topic: ${confirmation.connectionTopicId}, Confirmation Seq: ${confirmation.confirmedConnectionSequenceNumber}`);
+                        this.logger.info(`Connection confirmed for request #${connectionRequestId}. New connection topic: ${confirmation.connectionTopicId}`);
+
+                        // Add the new connection to DemoState
+                        const newConnection: ActiveConnection = {
+                            targetAccountId: requestingAccountId,
+                            // Use account ID as name for now, profile lookup could be added later
+                            targetAgentName: `Agent ${requestingAccountId}`,
+                            // We don't easily get the target's inbound topic here, mark as N/A
+                            targetInboundTopicId: 'N/A',
+                            connectionTopicId: confirmation.connectionTopicId
+                        };
+                        this.demoState.addActiveConnection(newConnection);
+                        this.logger.info(`Added new active connection to ${requestingAccountId} state.`);
 
                     } catch (handleError) {
                         this.logger.error(`Error handling connection request #${connectionRequestId} from ${requestingAccountId}:`, handleError);
-                        // Decide if we should track this failure to prevent retries
                     }
                 }
             } catch (error) {

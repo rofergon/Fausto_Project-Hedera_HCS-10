@@ -45,4 +45,4 @@ export interface HCS10Message {
 // export interface HCS10Config {
 //     topicId: string;
 //     network: 'mainnet' | 'testnet' | 'previewnet';
-// } 
+// }

@@ -61,4 +61,4 @@ export class Logger {
     error(message: string, ...args: any[]) {
         this.log('error', message, ...args);
     }
-} 
+}

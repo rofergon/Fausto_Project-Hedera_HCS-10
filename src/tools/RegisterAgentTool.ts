@@ -1,24 +1,23 @@
-// src/tools/RegisterAgentTool.ts
-
-import { HCS10Client } from "../hcs10/HCS10Client.js";
-import { AgentMetadata } from "../hcs10/types.js";
-import { StructuredTool } from "@langchain/core/tools";
-import { z } from "zod";
+import { HCS10Client } from '../hcs10/HCS10Client';
+import { AgentMetadata } from '../hcs10/types';
+import { StructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { RegisteredAgent } from '../demo-state';
 
 /**
  * RegisterAgentTool wraps the createAndRegisterAgent() function of HCS10Client.
  * It creates and registers an agent on Hedera using the HCS-10 standard SDK flow.
  */
 export class RegisterAgentTool extends StructuredTool {
-    name = "register_agent";
-    description = "Creates and registers the AI agent on the Hedera network following the HCS-10 standard.";
+    name = 'register_agent';
+    description = 'Creates and registers the AI agent on the Hedera network following the HCS-10 standard.';
     private client: HCS10Client;
 
     schema = z.object({
-        name: z.string().describe("The name of the agent to register"),
-        description: z.string().optional().describe("Optional description of the agent"),
-        type: z.enum(['autonomous', 'manual']).optional().describe("Optional agent type (default: autonomous)"),
-        model: z.string().optional().describe("Optional model identifier for the agent"),
+        name: z.string().describe('The name of the agent to register'),
+        description: z.string().optional().describe('Optional description of the agent'),
+        type: z.enum(['autonomous', 'manual']).optional().describe('Optional agent type (default: autonomous)'),
+        model: z.string().optional().describe('Optional model identifier for the agent'),
     });
 
     /**
@@ -31,8 +30,9 @@ export class RegisterAgentTool extends StructuredTool {
 
     /**
      * Calls createAndRegisterAgent() with the provided metadata.
+     * Returns the details of the registered agent.
      */
-    async _call(input: z.infer<typeof this.schema>): Promise<string> {
+    async _call(input: z.infer<typeof this.schema>): Promise<RegisteredAgent | string> {
         const metadata: AgentMetadata = {
             name: input.name,
             description: input.description,
@@ -43,13 +43,25 @@ export class RegisterAgentTool extends StructuredTool {
         try {
             const result = await this.client.createAndRegisterAgent(metadata);
 
-            const accountId = result?.metadata?.accountId || 'unknown';
-            const inboundTopicId = result?.metadata?.inboundTopicId || 'unknown';
-            const outboundTopicId = result?.metadata?.outboundTopicId || 'unknown';
+            const accountId = result?.metadata?.accountId;
+            const inboundTopicId = result?.metadata?.inboundTopicId;
+            const outboundTopicId = result?.metadata?.outboundTopicId;
+            const profileTopicId = result?.metadata?.profileTopicId;
 
-            return `Successfully created and registered agent "${input.name}". Account: ${accountId}, Inbound Topic: ${inboundTopicId}, Outbound Topic: ${outboundTopicId}`;
+            if (!accountId || !inboundTopicId || !outboundTopicId) {
+                return 'Error: Registration failed. The HCS client returned incomplete details.';
+            }
+
+            const registeredAgent: RegisteredAgent = {
+                name: input.name,
+                accountId: accountId,
+                inboundTopicId: inboundTopicId,
+                outboundTopicId: outboundTopicId,
+                profileTopicId: profileTopicId
+            };
+            return registeredAgent;
         } catch (error) {
-            throw new Error(`Failed to create/register agent: ${error instanceof Error ? error.message : String(error)}`);
+            return `Error: Failed to create/register agent "${input.name}". Reason: ${error instanceof Error ? error.message : String(error)}`;
         }
     }
 }
