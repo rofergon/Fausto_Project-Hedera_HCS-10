@@ -5,8 +5,13 @@ import { ConnectionTool } from '../src/tools/ConnectionTool';
 import readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.join(__dirname, '..');
 
 // --- Interfaces & State ---
 interface RegisteredAgent {
@@ -39,7 +44,8 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const question = (query: string): Promise<string> => new Promise((resolve) => rl.question(query, resolve));
+const question = (query: string): Promise<string> =>
+  new Promise((resolve) => rl.question(query, resolve));
 
 // --- Helper Functions ---
 function displayHeader(title: string) {
@@ -69,7 +75,7 @@ async function registerNewAgent() {
     'Enter agent model identifier (optional, e.g., gpt-4o): '
   );
   const pfpPath = await question(
-    'Enter the full path to the profile picture file: '
+    'Enter the path to the profile picture file (relative to project root, e.g., logo.png): '
   );
 
   if (!name) {
@@ -77,25 +83,27 @@ async function registerNewAgent() {
     return;
   }
 
-  let pfpBuffer: Buffer | undefined = undefined;
   let pfpFileName: string | undefined = undefined;
+  let pfpBuffer: Buffer | undefined = undefined;
 
-  // Validate and read the profile picture file
   if (pfpPath) {
+    // Construct path relative to project root
+    const pfpLocation = path.join(projectRoot, pfpPath);
+    console.log(`Attempting to read profile picture from: ${pfpLocation}`);
+
     try {
-      if (!fs.existsSync(pfpPath)) {
-        throw new Error(`File not found at path: ${pfpPath}`);
+      if (!fs.existsSync(pfpLocation)) {
+        throw new Error(`File not found at path: ${pfpLocation}`);
       }
-      pfpBuffer = fs.readFileSync(pfpPath);
+
+      pfpBuffer = fs.readFileSync(pfpLocation);
       pfpFileName = path.basename(pfpPath);
       console.log(
-        `Read profile picture ${pfpFileName} (${pfpBuffer.length} bytes).`
+        `Read profile picture ${pfpFileName} (${pfpBuffer?.length} bytes).`
       );
 
-      if (pfpBuffer.length === 0) {
+      if (pfpBuffer?.length === 0) {
         console.warn('Warning: The selected profile picture file is empty.');
-        // Decide if we should proceed or ask again
-        // For now, we'll allow it but the SDK might reject it
       }
     } catch (fileError) {
       console.error(
@@ -106,7 +114,6 @@ async function registerNewAgent() {
       console.log(
         'Proceeding without a profile picture. Agent registration might fail.'
       );
-      // Reset pfp variables if reading failed
       pfpBuffer = undefined;
       pfpFileName = undefined;
     }
@@ -557,7 +564,7 @@ async function showMenu() {
   console.log(
     `Active Agent: ${
       currentAgent
-        ? `${currentAgent.name  } (${  currentAgent.accountId  })`
+        ? `${currentAgent.name} (${currentAgent.accountId})`
         : 'None Selected'
     }`
   );
