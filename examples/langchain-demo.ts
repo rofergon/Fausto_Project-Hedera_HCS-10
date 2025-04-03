@@ -78,10 +78,21 @@ async function initialize() {
     const standardNetwork: StandardNetworkType = hederaNetwork;
 
     // --- Initialize HCS Client and State ---
-    hcsClient = new HCS10Client(operatorId, operatorKey, network, {
+    hcsClient = new HCS10Client(operatorId, operatorKey, standardNetwork, {
       useEncryption: false,
       registryUrl: registryUrl,
     });
+
+    const monitoringHcsClient = new HCS10Client(
+      operatorId,
+      operatorKey,
+      standardNetwork,
+      {
+        useEncryption: false,
+        registryUrl: registryUrl,
+        logLevel: 'error',
+      }
+    );
 
     // Instantiate the renamed state class
     stateManager = new OpenConvaiState();
@@ -92,6 +103,10 @@ async function initialize() {
         `Setting client identity to TODD: ${process.env.TODD_ACCOUNT_ID}`
       );
       hcsClient.setClient(
+        process.env.TODD_ACCOUNT_ID,
+        process.env.TODD_PRIVATE_KEY
+      );
+      monitoringHcsClient.setClient(
         process.env.TODD_ACCOUNT_ID,
         process.env.TODD_PRIVATE_KEY
       );
@@ -129,7 +144,10 @@ async function initialize() {
       }),
       new CheckMessagesTool({ hcsClient, stateManager: stateManager }),
       new SendMessageTool(hcsClient),
-      new ConnectionTool({ client: hcsClient, stateManager: stateManager }),
+      new ConnectionTool({
+        client: monitoringHcsClient,
+        stateManager: stateManager,
+      }),
     ];
     connectionMonitor = tools.find(
       (tool) => tool instanceof ConnectionTool

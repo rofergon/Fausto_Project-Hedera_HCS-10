@@ -25,8 +25,8 @@ export class ConnectionTool extends StructuredTool {
   name = 'monitor_connections';
   description =
     "Starts passively LISTENING on the current agent's own inbound topic for INCOMING HCS-10 connection requests. Handles received requests automatically. Takes NO arguments. DO NOT use this to start a new connection TO someone else.";
-  private client: HCS10Client;
-  private logger: Logger;
+  public client: HCS10Client;
+  public logger: Logger;
   private stateManager: StateManagerInterface; // Renamed property
   private isMonitoring: boolean = false; // Flag to prevent multiple monitors
   private monitoringTopic: string | null = null;

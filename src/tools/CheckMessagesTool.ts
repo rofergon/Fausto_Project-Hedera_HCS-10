@@ -24,7 +24,7 @@ export class CheckMessagesTool extends StructuredTool {
       ),
   });
 
-  private hcsClient: HCS10Client;
+  public hcsClient: HCS10Client;
   private stateManager: StateManagerInterface;
   private logger: Logger;
 

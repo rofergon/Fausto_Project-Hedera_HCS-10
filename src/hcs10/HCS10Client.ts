@@ -14,6 +14,7 @@ import {
   WaitForConnectionConfirmationResponse,
   ProfileResponse,
   HCSMessage,
+  LogLevel,
 } from '@hashgraphonline/standards-sdk';
 
 import { AgentMetadata, AgentChannels } from './types';
@@ -64,7 +65,7 @@ export class HCS10Client {
     operatorPrivateKey: string,
     // Restrict network type to what the standard SDK expects
     network: StandardNetworkType,
-    options?: { useEncryption?: boolean; registryUrl?: string }
+    options?: { useEncryption?: boolean; registryUrl?: string; logLevel?: LogLevel }
   ) {
     // Instantiate the standard SDK client using the imported class
     // The passed 'network' now matches the expected type
@@ -73,6 +74,7 @@ export class HCS10Client {
       operatorId: operatorId,
       operatorPrivateKey: operatorPrivateKey,
       guardedRegistryBaseUrl: options?.registryUrl,
+      logLevel: options?.logLevel,
       // Add other necessary config options based on StandardSDKClient constructor if needed
     });
     this.guardedRegistryBaseUrl = options?.registryUrl || '';

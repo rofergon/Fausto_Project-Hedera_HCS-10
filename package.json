@@ -18,7 +18,7 @@
     "release": "npm publish --access public",
     "cli-demo": "tsx examples/cli-demo.ts",
     "interactive-demo": "tsx examples/interactive-demo.ts",
-    "langchain-demo": "tsx examples/langchain-demo.js"
+    "langchain-demo": "tsx examples/langchain-demo.ts"
   },
   "keywords": [
     "hedera",
@@ -31,7 +31,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@hashgraph/sdk": "^2.62.0",
-    "@hashgraphonline/standards-sdk": "0.0.61",
+    "@hashgraphonline/standards-sdk": "0.0.62",
     "@langchain/community": "^0.3.37",
     "@langchain/openai": "^0.5.1",
     "dotenv": "^16.4.1",
