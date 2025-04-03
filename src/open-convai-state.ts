@@ -1,4 +1,4 @@
-// src/demo-state.ts
+// src/open-convai-state.ts
 
 // Interfaces reused from cli-demo for consistency
 export interface RegisteredAgent {
@@ -17,10 +17,11 @@ export interface ActiveConnection {
 }
 
 /**
- * Holds the shared state for the interactive demo.
- * Tools will need access to this instance to read/update state.
+ * Holds shared state, primarily for demonstration purposes.
+ * Tools can use an instance of this (or a similar custom class)
+ * via their `stateManager` constructor parameter to track connections.
  */
-export class DemoState {
+export class OpenConvaiState {
     currentAgent: RegisteredAgent | null = null;
     activeConnections: ActiveConnection[] = [];
     // Store last processed consensus timestamp (in nanoseconds) for message polling
@@ -28,7 +29,7 @@ export class DemoState {
 
     // --- Agent Management ---
     setCurrentAgent(agent: RegisteredAgent | null): void {
-        console.log(`[DemoState] Setting active agent: ${agent?.name ?? 'None'}`);
+        console.log(`[OpenConvaiState] Setting active agent: ${agent?.name ?? 'None'}`);
         this.currentAgent = agent;
         // Clear connections when agent changes
         this.activeConnections = [];
@@ -43,12 +44,12 @@ export class DemoState {
     addActiveConnection(connection: ActiveConnection): void {
         // Avoid duplicates
         if (!this.activeConnections.some(c => c.connectionTopicId === connection.connectionTopicId)) {
-            console.log(`[DemoState] Adding active connection to ${connection.targetAgentName} (${connection.targetAccountId})`);
+            console.log(`[OpenConvaiState] Adding active connection to ${connection.targetAgentName} (${connection.targetAccountId})`);
             this.activeConnections.push(connection);
             // Initialize timestamp - use current time as rough estimate
             this.connectionMessageTimestamps[connection.connectionTopicId] = Date.now() * 1_000_000;
         } else {
-            console.log(`[DemoState] Connection to ${connection.targetAgentName} already exists.`);
+            console.log(`[OpenConvaiState] Connection to ${connection.targetAgentName} already exists.`);
         }
     }
 
@@ -69,13 +70,24 @@ export class DemoState {
 
     // --- Message Timestamp Management ---
     getLastTimestamp(connectionTopicId: string): number {
-        return this.connectionMessageTimestamps[connectionTopicId] || 0;
+        // Find connection by topic ID first to adhere to potential interface
+         for (const entry of this.activeConnections) {
+            if(entry.connectionTopicId === connectionTopicId) {
+                return this.connectionMessageTimestamps[connectionTopicId] || 0;
+            }
+        }
+        return 0;
     }
 
     updateTimestamp(connectionTopicId: string, timestampNanos: number): void {
-        if (timestampNanos > this.getLastTimestamp(connectionTopicId)) {
-            console.log(`[DemoState] Updating timestamp for topic ${connectionTopicId} to ${timestampNanos}`);
-            this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
+         for (const entry of this.activeConnections) {
+             if(entry.connectionTopicId === connectionTopicId) {
+                if (timestampNanos > (this.connectionMessageTimestamps[connectionTopicId] || 0)) {
+                    console.log(`[OpenConvaiState] Updating timestamp for topic ${connectionTopicId} to ${timestampNanos}`);
+                    this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
+                }
+                return; // Exit once found and updated
+            }
         }
     }
 }

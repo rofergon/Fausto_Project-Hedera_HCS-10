@@ -2,7 +2,7 @@ import { HCS10Client, StandardNetworkType } from './hcs10/HCS10Client';
 import { RegisterAgentTool } from './tools/RegisterAgentTool';
 import { SendMessageTool } from './tools/SendMessageTool';
 import { ConnectionTool } from './tools/ConnectionTool';
-import { DemoState } from './demo-state';
+import { DemoState } from './open-convai-state';
 
 // Define options type including DemoState
 export interface HCS10InitializationOptions {

@@ -48,10 +48,9 @@ export class SendMessageTool extends StructuredTool {
   }): Promise<string> {
     try {
       const messageData = {
-        type: input.messageType || 'message',
         data: input.message,
-        timestamp: Date.now(),
         requestId: `req-${crypto.randomBytes(8).toString('hex')}`,
+        ...(input.messageType && { messageType: input.messageType }),
         ...(input.dataset && { dataset: input.dataset }),
       };
 

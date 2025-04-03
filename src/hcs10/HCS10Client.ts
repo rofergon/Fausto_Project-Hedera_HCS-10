@@ -19,6 +19,12 @@ import {
 import { AgentMetadata, AgentChannels } from './types';
 import { encryptMessage } from '../utils/Encryption';
 
+export interface HCSMessageWithTimestamp extends HCSMessage {
+  timestamp: number;
+  data: string;
+  sequence_number: number;
+}
+
 // Add pfp details to AgentMetadata type definition
 export interface ExtendedAgentMetadata extends AgentMetadata {
   pfpBuffer?: Buffer;
@@ -295,29 +301,21 @@ export class HCS10Client {
    * @returns Messages from the topic, mapped to the expected format.
    */
   public async getMessages(topicId: string): Promise<{
-    messages: Array<{
-      timestamp: number;
-      data: string;
-      sequence_number: number;
-    }>;
+    messages: HCSMessageWithTimestamp[];
   }> {
-    // ... (implementation remains the same, uses this.standardClient)
     try {
-      // Assuming standardClient.getMessages returns an object with a messages array
-      // structured like { messages: [{ consensus_timestamp: '...', data: '...', sequence_number: ... }] }
       const result = await this.standardClient.getMessages(topicId);
 
-      // Add type to sdkMessage to resolve potential linter warning if needed
       const mappedMessages = result.messages.map((sdkMessage) => {
         const timestamp = sdkMessage?.created?.getTime() || 0;
 
         return {
+          ...sdkMessage,
           timestamp: timestamp,
           data: sdkMessage.data, // Assume data is directly usable or needs decoding based on standardClient
           sequence_number: sdkMessage.sequence_number, // Ensure sequence number is included
         };
       });
-      // Sort messages by timestamp just in case they aren't ordered
       mappedMessages.sort(
         (a: { timestamp: number }, b: { timestamp: number }) =>
           a.timestamp - b.timestamp

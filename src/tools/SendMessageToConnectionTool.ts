@@ -3,12 +3,12 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { DemoState } from '../demo-state';
+import { OpenConvaiState as StateManagerInterface } from '../open-convai-state';
 import { Logger } from '../utils/logger'; // Assuming logger utility
 
 export interface SendMessageToConnectionToolParams extends ToolParams {
   hcsClient: HCS10Client;
-  demoState: DemoState;
+  stateManager: StateManagerInterface;
 }
 
 /**
@@ -28,17 +28,17 @@ export class SendMessageToConnectionTool extends StructuredTool {
   });
 
   private hcsClient: HCS10Client;
-  private demoState: DemoState;
+  private stateManager: StateManagerInterface;
   private logger: Logger;
 
   constructor({
     hcsClient,
-    demoState,
+    stateManager,
     ...rest
   }: SendMessageToConnectionToolParams) {
     super(rest);
     this.hcsClient = hcsClient;
-    this.demoState = demoState;
+    this.stateManager = stateManager;
     this.logger = Logger.getInstance({ module: 'SendMessageToConnectionTool' });
   }
 
@@ -46,13 +46,13 @@ export class SendMessageToConnectionTool extends StructuredTool {
     targetIdentifier,
     message,
   }: z.infer<this['schema']>): Promise<string> {
-    const currentAgent = this.demoState.getCurrentAgent();
+    const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
       return 'Error: Cannot send message. No agent is currently active. Please register or select an agent first.';
     }
 
     const connection =
-      this.demoState.getConnectionByIdentifier(targetIdentifier);
+      this.stateManager.getConnectionByIdentifier(targetIdentifier);
     if (!connection) {
       return `Error: Could not find an active connection matching identifier "${targetIdentifier}". Use 'list_connections' to see active connections.`;
     }

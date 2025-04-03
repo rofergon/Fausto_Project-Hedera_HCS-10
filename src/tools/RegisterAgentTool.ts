@@ -72,6 +72,7 @@ export class RegisterAgentTool extends StructuredTool {
           TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
           TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
         });
+        this.client.setClient(accountId, privateKey);
       }
 
       try {
@@ -86,8 +87,6 @@ export class RegisterAgentTool extends StructuredTool {
       } catch (error) {
         console.error('failed to auto fund agent', error);
       }
-
-      this.client.setClient(accountId, privateKey);
 
       if (!accountId || !inboundTopicId || !outboundTopicId || !privateKey) {
         return `Error: Registration failed. The HCS client returned incomplete details (Missing: ${[
