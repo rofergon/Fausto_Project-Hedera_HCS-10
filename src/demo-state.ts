@@ -78,4 +78,4 @@ export class DemoState {
             this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
         }
     }
-} 
+}

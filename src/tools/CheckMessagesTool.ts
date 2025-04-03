@@ -1,8 +1,8 @@
-import { StructuredTool, ToolParams } from "@langchain/core/tools";
-import { z } from "zod";
-import { HCS10Client } from "../hcs10/HCS10Client.js";
-import { DemoState } from "../demo-state.js";
-import { Logger } from "../utils/logger.js"; // Assuming logger utility
+import { StructuredTool, ToolParams } from '@langchain/core/tools';
+import { z } from 'zod';
+import { HCS10Client } from '../hcs10/HCS10Client';
+import { DemoState } from '../demo-state';
+import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
 export interface CheckMessagesToolParams extends ToolParams {
     hcsClient: HCS10Client;
@@ -13,7 +13,7 @@ export interface CheckMessagesToolParams extends ToolParams {
  * A tool to check for new messages on an active HCS-10 connection topic.
  */
 export class CheckMessagesTool extends StructuredTool {
-    name = "check_new_messages";
+    name = 'check_new_messages';
     description = "Checks for and retrieves new messages from an active connection. Identify the target agent using their account ID (e.g., 0.0.12345) or the connection number shown in 'list_connections'.";
     schema = z.object({
         targetIdentifier: z.string().describe("The account ID (e.g., 0.0.12345) of the target agent OR the connection number (e.g., '1', '2') from the 'list_connections' tool to check messages for.")
@@ -30,7 +30,7 @@ export class CheckMessagesTool extends StructuredTool {
         this.logger = Logger.getInstance({ module: 'CheckMessagesTool' });
     }
 
-    protected async _call({ targetIdentifier }: z.infer<this["schema"]>): Promise<string> {
+    protected async _call({ targetIdentifier }: z.infer<this['schema']>): Promise<string> {
         const connection = this.demoState.getConnectionByIdentifier(targetIdentifier);
 
         if (!connection) {
@@ -126,4 +126,4 @@ ${displayContent}
             return `Error checking messages for ${targetAgentName}: ${error instanceof Error ? error.message : String(error)}`;
         }
     }
-} 
+}

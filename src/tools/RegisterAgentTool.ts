@@ -1,25 +1,23 @@
-// src/tools/RegisterAgentTool.ts
-
-import { HCS10Client } from "../hcs10/HCS10Client.js";
-import { AgentMetadata } from "../hcs10/types.js";
-import { StructuredTool } from "@langchain/core/tools";
-import { z } from "zod";
-import { RegisteredAgent } from "../demo-state.js";
+import { HCS10Client } from '../hcs10/HCS10Client';
+import { AgentMetadata } from '../hcs10/types';
+import { StructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { RegisteredAgent } from '../demo-state';
 
 /**
  * RegisterAgentTool wraps the createAndRegisterAgent() function of HCS10Client.
  * It creates and registers an agent on Hedera using the HCS-10 standard SDK flow.
  */
 export class RegisterAgentTool extends StructuredTool {
-    name = "register_agent";
-    description = "Creates and registers the AI agent on the Hedera network following the HCS-10 standard.";
+    name = 'register_agent';
+    description = 'Creates and registers the AI agent on the Hedera network following the HCS-10 standard.';
     private client: HCS10Client;
 
     schema = z.object({
-        name: z.string().describe("The name of the agent to register"),
-        description: z.string().optional().describe("Optional description of the agent"),
-        type: z.enum(['autonomous', 'manual']).optional().describe("Optional agent type (default: autonomous)"),
-        model: z.string().optional().describe("Optional model identifier for the agent"),
+        name: z.string().describe('The name of the agent to register'),
+        description: z.string().optional().describe('Optional description of the agent'),
+        type: z.enum(['autonomous', 'manual']).optional().describe('Optional agent type (default: autonomous)'),
+        model: z.string().optional().describe('Optional model identifier for the agent'),
     });
 
     /**
@@ -51,7 +49,7 @@ export class RegisterAgentTool extends StructuredTool {
             const profileTopicId = result?.metadata?.profileTopicId;
 
             if (!accountId || !inboundTopicId || !outboundTopicId) {
-                return "Error: Registration failed. The HCS client returned incomplete details.";
+                return 'Error: Registration failed. The HCS client returned incomplete details.';
             }
 
             const registeredAgent: RegisteredAgent = {

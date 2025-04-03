@@ -1,6 +1,5 @@
-import { ChatOpenAI } from '@langchain/openai';
 import * as dotenv from 'dotenv';
-import { initializeHCS10Client } from '../src/index.js';
+import { initializeHCS10Client } from '../src/index';
 import { HCS10Client, ExtendedAgentMetadata } from '../src/hcs10/HCS10Client';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
 import readline from 'readline';
@@ -40,9 +39,7 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const question = (query: string): Promise<string> => {
-  return new Promise((resolve) => rl.question(query, resolve));
-};
+const question = (query: string): Promise<string> => new Promise((resolve) => rl.question(query, resolve));
 
 // --- Helper Functions ---
 function displayHeader(title: string) {
@@ -560,7 +557,7 @@ async function showMenu() {
   console.log(
     `Active Agent: ${
       currentAgent
-        ? currentAgent.name + ' (' + currentAgent.accountId + ')'
+        ? `${currentAgent.name  } (${  currentAgent.accountId  })`
         : 'None Selected'
     }`
   );

@@ -1,10 +1,10 @@
-import { HCS10Client } from "../hcs10/HCS10Client.js";
-import { StructuredTool, ToolParams } from "@langchain/core/tools";
-import { z } from "zod";
+import { HCS10Client } from '../hcs10/HCS10Client';
+import { StructuredTool, ToolParams } from '@langchain/core/tools';
+import { z } from 'zod';
 // Import FeeConfigBuilder if needed for explicit fee handling
 // import { FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
-import { Logger } from '../utils/logger.js'; // Added .js // Assuming a logger utility exists
-import { DemoState, ActiveConnection } from "../demo-state.js"; // Import DemoState and ActiveConnection
+import { Logger } from '@hashgraphonline/standards-sdk';
+import { DemoState, ActiveConnection } from '../demo-state'; // Import DemoState and ActiveConnection
 
 // Add demoState to params
 export interface ConnectionToolParams extends ToolParams {
@@ -17,7 +17,7 @@ export interface ConnectionToolParams extends ToolParams {
  * and automatically handles them using the HCS-10 standard SDK flow.
  */
 export class ConnectionTool extends StructuredTool {
-    name = "monitor_connections";
+    name = 'monitor_connections';
     description = "Starts monitoring an agent's inbound topic for HCS-10 connection requests and handles them automatically.";
     private client: HCS10Client;
     private logger: Logger;

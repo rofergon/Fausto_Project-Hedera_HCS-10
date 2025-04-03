@@ -1,11 +1,8 @@
-// src/index.ts
-
-import { createHederaClient } from "./utils/HederaClient.js";
-import { HCS10Client, StandardNetworkType } from "./hcs10/HCS10Client.js";
-import { RegisterAgentTool } from "./tools/RegisterAgentTool.js";
-import { SendMessageTool } from "./tools/SendMessageTool.js";
-import { ConnectionTool, ConnectionToolParams } from "./tools/ConnectionTool.js";
-import { DemoState } from "./demo-state.js";
+import { HCS10Client, StandardNetworkType } from './hcs10/HCS10Client';
+import { RegisterAgentTool } from './tools/RegisterAgentTool';
+import { SendMessageTool } from './tools/SendMessageTool';
+import { ConnectionTool } from './tools/ConnectionTool';
+import { DemoState } from './demo-state';
 
 // Define options type including DemoState
 export interface HCS10InitializationOptions {
@@ -23,7 +20,7 @@ export async function initializeHCS10Client(options?: HCS10InitializationOptions
     const operatorId = process.env.HEDERA_ACCOUNT_ID;
     const operatorPrivateKey = process.env.HEDERA_PRIVATE_KEY;
     // Get network from env, default to testnet
-    let networkEnv = process.env.HEDERA_NETWORK || 'testnet';
+    const networkEnv = process.env.HEDERA_NETWORK || 'testnet';
 
     // Validate and cast network type
     let network: StandardNetworkType;
@@ -37,7 +34,7 @@ export async function initializeHCS10Client(options?: HCS10InitializationOptions
     }
 
     if (!operatorId || !operatorPrivateKey) {
-        throw new Error("HEDERA_ACCOUNT_ID and HEDERA_PRIVATE_KEY must be set in environment variables.");
+        throw new Error('HEDERA_ACCOUNT_ID and HEDERA_PRIVATE_KEY must be set in environment variables.');
     }
 
     // Instantiate HCS10Client with validated network type
@@ -59,7 +56,7 @@ export async function initializeHCS10Client(options?: HCS10InitializationOptions
     // Instantiate ConnectionTool, passing demoState if provided
     if (!options?.demoState) {
         // This case should ideally not happen for interactive-demo, but handle defensively
-        console.warn("[initializeHCS10Client] Warning: DemoState not provided. ConnectionTool background updates will not update shared state.");
+        console.warn('[initializeHCS10Client] Warning: DemoState not provided. ConnectionTool background updates will not update shared state.');
         // Potentially throw an error if demoState is strictly required for ConnectionTool
     }
     const connectionTool = new ConnectionTool({
@@ -77,7 +74,7 @@ export async function initializeHCS10Client(options?: HCS10InitializationOptions
     };
 }
 
-export * from "./hcs10/HCS10Client.js";
-export * from "./tools/RegisterAgentTool.js";
-export * from "./tools/SendMessageTool.js";
-export * from "./tools/ConnectionTool.js";
+export * from './hcs10/HCS10Client';
+export * from './tools/RegisterAgentTool';
+export * from './tools/SendMessageTool';
+export * from './tools/ConnectionTool';

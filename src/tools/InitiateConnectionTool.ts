@@ -2,7 +2,7 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { DemoState, ActiveConnection } from '../demo-state';
-import { Logger } from '../utils/logger'; // Assuming logger utility
+import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
 export interface InitiateConnectionToolParams extends ToolParams {
   hcsClient: HCS10Client;
@@ -55,11 +55,12 @@ export class InitiateConnectionTool extends StructuredTool {
       const targetProfile = await this.hcsClient.retrieveProfile(
         targetAccountId
       );
-      if (!targetProfile?.inboundTopicId) {
+      if (!targetProfile?.topicInfo?.inboundTopic) {
         return `Error: Could not retrieve profile or find inbound topic ID for target agent ${targetAccountId}. They might not be registered or have a public profile.`;
       }
-      const targetInboundTopicId = targetProfile.inboundTopicId;
-      const targetAgentName = targetProfile.name || `Agent ${targetAccountId}`; // Use name if available
+      const targetInboundTopicId = targetProfile.topicInfo.inboundTopic;
+      const targetAgentName =
+        targetProfile.profile.name || `Agent ${targetAccountId}`; // Use name if available
       this.logger.debug(
         `Found target inbound topic: ${targetInboundTopicId}, Name: ${targetAgentName}`
       );
