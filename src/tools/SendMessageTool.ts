@@ -1,6 +1,7 @@
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { Logger } from '@hashgraphonline/standards-sdk';
 import * as crypto from 'crypto';
 
 /**
@@ -13,6 +14,7 @@ export class SendMessageTool extends StructuredTool {
     'Sends a message to a specified Hedera topic using HCS-10 and monitors for responses.';
   private client: HCS10Client;
   private lastProcessedTimestamp: number = 0;
+  private logger: Logger;
 
   schema = z.object({
     topicId: z.string().describe('The Hedera topic ID to send the message to'),
@@ -35,6 +37,7 @@ export class SendMessageTool extends StructuredTool {
   constructor(client: HCS10Client) {
     super();
     this.client = client;
+    this.logger = Logger.getInstance({ module: 'SendMessageTool' });
   }
 
   /**
@@ -54,11 +57,15 @@ export class SendMessageTool extends StructuredTool {
         ...(input.dataset && { dataset: input.dataset }),
       };
 
-      await this.client.sendMessage(input.topicId, JSON.stringify(messageData));
-      const response = await this.monitorResponses(
+      const result = await this.client.sendMessage(
         input.topicId,
-        messageData.requestId
+        JSON.stringify(messageData)
       );
+      if (!result) {
+        throw new Error('Failed to send message');
+      }
+      this.logger.info(`Message sent with sequence number ${result}`);
+      const response = await this.monitorResponses(input.topicId, result);
 
       return `Successfully sent message to topic ${input.topicId}${
         response ? `\nResponse: ${response}` : ''
@@ -74,7 +81,7 @@ export class SendMessageTool extends StructuredTool {
 
   private async monitorResponses(
     topicId: string,
-    requestId: string
+    sequenceNumber: number
   ): Promise<string | null> {
     const maxAttempts = 10;
     let attempts = 0;
@@ -96,16 +103,16 @@ export class SendMessageTool extends StructuredTool {
             try {
               parsedContent = JSON.parse(content);
             } catch (error) {
-              console.error(`Error parsing message content: ${error}`);
+              this.logger.error(`Error parsing message content: ${error}`);
               continue;
             }
-            if (parsedContent.requestId === requestId) {
+            if (message.sequence_number > sequenceNumber) {
               return JSON.stringify(parsedContent);
             }
           }
         }
       } catch (error) {
-        console.error(`Error monitoring responses: ${error}`);
+        this.logger.error(`Error monitoring responses: ${error}`);
       }
 
       attempts++;

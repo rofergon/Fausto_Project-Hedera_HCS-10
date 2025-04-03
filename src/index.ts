@@ -19,8 +19,8 @@ export interface HCS10InitializationOptions {
 export async function initializeHCS10Client(
   options?: HCS10InitializationOptions
 ) {
-  const operatorId = process.env.HEDERA_ACCOUNT_ID;
-  const operatorPrivateKey = process.env.HEDERA_PRIVATE_KEY;
+  const operatorId = process.env.HEDERA_OPERATOR_ID;
+  const operatorPrivateKey = process.env.HEDERA_OPERATOR_KEY;
   // Get network from env, default to testnet
   const networkEnv = process.env.HEDERA_NETWORK || 'testnet';
 

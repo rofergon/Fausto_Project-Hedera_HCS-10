@@ -61,7 +61,7 @@ async function initialize() {
 
     if (!operatorId || !operatorKey) {
       throw new Error(
-        'OPERATOR_ID and OPERATOR_PRIVATE_KEY must be set in .env for initial client setup.'
+        'HEDERA_OPERATOR_ID and HEDERA_PRIVATE_KEY must be set in .env for initial client setup.'
       );
     }
     if (!openaiApiKey) {
@@ -190,28 +190,32 @@ async function initialize() {
       verbose: false,
     });
 
-    console.log('LangChain agent initialized.');
+    runMonitoring();
 
-    // --- Start Connection Monitoring ---
-    if (connectionMonitor) {
-      console.log('Attempting to start background connection monitoring...');
-      try {
-        // _call now internally gets the topic ID
-        await connectionMonitor._call({}); // Start the internal monitoring loop
-        console.log('Background connection monitor initiated.');
-        // No need to await the background process itself
-      } catch (err) {
-        console.error('Could not get inbound topic ID to start monitor:', err);
-        console.warn('Connection monitoring could not be started.');
-      }
-    } else {
-      console.warn('ConnectionTool instance not found, cannot monitor.');
-    }
+    console.log('LangChain agent initialized.');
   } catch (error) {
     console.error('Initialization failed:', error);
     process.exit(1);
   }
 }
+
+const runMonitoring = async () => {
+  // --- Start Connection Monitoring ---
+  if (connectionMonitor) {
+    console.log('Attempting to start background connection monitoring...');
+    try {
+      // _call now internally gets the topic ID
+      await connectionMonitor._call({}); // Start the internal monitoring loop
+      console.log('Background connection monitor initiated.');
+      // No need to await the background process itself
+    } catch (err) {
+      console.error('Could not get inbound topic ID to start monitor:', err);
+      console.warn('Connection monitoring could not be started.');
+    }
+  } else {
+    console.warn('ConnectionTool instance not found, cannot monitor.');
+  }
+};
 
 // --- Chat Loop ---
 async function chatLoop() {

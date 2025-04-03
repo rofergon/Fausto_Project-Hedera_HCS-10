@@ -65,7 +65,11 @@ export class HCS10Client {
     operatorPrivateKey: string,
     // Restrict network type to what the standard SDK expects
     network: StandardNetworkType,
-    options?: { useEncryption?: boolean; registryUrl?: string; logLevel?: LogLevel }
+    options?: {
+      useEncryption?: boolean;
+      registryUrl?: string;
+      logLevel?: LogLevel;
+    }
   ) {
     // Instantiate the standard SDK client using the imported class
     // The passed 'network' now matches the expected type
@@ -149,7 +153,10 @@ export class HCS10Client {
     // Assuming standardClient has a submitConnectionRequest that returns a receipt or similar.
     // If not, this needs refactoring to build the payload and use submitPayload.
     // Let's *assume* for now it exists and returns a receipt for the first message submission.
-    return this.standardClient.submitConnectionRequest(inboundTopicId, memo) as any; // Type cast to resolve SDK version conflicts
+    return this.standardClient.submitConnectionRequest(
+      inboundTopicId,
+      memo
+    ) as any; // Type cast to resolve SDK version conflicts
   }
 
   /**
@@ -271,7 +278,7 @@ export class HCS10Client {
     data: string,
     memo?: string,
     submitKey?: PrivateKey // Use imported PrivateKey type
-  ): Promise<string> {
+  ): Promise<number | undefined> {
     // Encrypt the final payload string if needed
     if (this.useEncryption) {
       data = encryptMessage(data);
@@ -285,7 +292,7 @@ export class HCS10Client {
         memo,
         submitKey as any // Type cast to avoid SDK version conflicts
       );
-      return messageResponse.status.toString();
+      return messageResponse.topicSequenceNumber?.toNumber();
     } catch (error) {
       console.error(`Error sending message to topic ${topicId}:`, error);
       throw new Error(
