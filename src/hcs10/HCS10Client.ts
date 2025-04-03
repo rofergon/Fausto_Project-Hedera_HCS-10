@@ -45,7 +45,7 @@ export type StandardNetworkType = 'mainnet' | 'testnet';
  */
 export class HCS10Client {
   // Use the standard SDK's client type via alias
-  private standardClient: StandardSDKClient;
+  public standardClient: StandardSDKClient;
   private useEncryption: boolean;
 
   // Note: AgentChannels might become redundant if standardClient manages them internally

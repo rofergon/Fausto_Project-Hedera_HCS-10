@@ -1,4 +1,9 @@
-import { ENV_FILE_PATH, updateEnvFile } from '../../examples/utils';
+import { Logger } from '@hashgraphonline/standards-sdk';
+import {
+  ensureAgentHasEnoughHbar,
+  ENV_FILE_PATH,
+  updateEnvFile,
+} from '../../examples/utils';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { AgentMetadata } from '../hcs10/types';
 import { StructuredTool } from '@langchain/core/tools';
@@ -65,6 +70,15 @@ export class RegisterAgentTool extends StructuredTool {
         TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
         TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
       });
+
+      await ensureAgentHasEnoughHbar(
+        Logger.getInstance({
+          module: 'RegisterAgentTool',
+        }),
+        this.client.standardClient,
+        accountId,
+        input.name
+      );
 
       this.client.setClient(accountId, privateKey);
 
