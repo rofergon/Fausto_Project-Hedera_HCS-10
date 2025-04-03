@@ -1,7 +1,7 @@
 {
   "name": "@hashgraphonline/standards-agent-kit",
   "version": "0.0.3",
-  "description": "A toolkit for building online agents on the Hedera Hashgraph network",
+  "description": "An Agents implementation of Hashgraph Online's Standards SDK",
   "type": "module",
   "main": "./dist/index.es.js",
   "types": "dist/index.d.ts",
@@ -29,7 +29,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@hashgraph/sdk": "^2.39.0",
-    "@hashgraphonline/standards-sdk": "^0.0.50",
+    "@hashgraphonline/standards-sdk": "0.0.59",
     "@langchain/community": "^0.3.37",
     "@langchain/openai": "^0.5.1",
     "dotenv": "^16.4.1",

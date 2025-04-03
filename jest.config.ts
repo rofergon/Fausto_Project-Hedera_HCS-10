@@ -26,9 +26,7 @@ export default {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/?(*.)+(spec|test).ts'],
-  transformIgnorePatterns: [
-    '/node_modules/(?!(@langchain/core|langchain)/.*)',
-  ],
+  transformIgnorePatterns: ['/node_modules/(?!(@langchain/core|langchain)/.*)'],
   detectOpenHandles: true,
   forceExit: true,
-}; 
+};
