@@ -26,7 +26,7 @@ We appreciate your interest in helping us and the rest of our community. We welc
 
 ## Bug Reports
 
-Bug reports are accepted through the [Issues](https://github.com/hashgraph-online/standards-sdk/issues) page.
+Bug reports are accepted through the [Issues](https://github.com/hashgraph-online/standards-agent-kit/issues) page.
 
 The `bug` label is used to track bugs.
 

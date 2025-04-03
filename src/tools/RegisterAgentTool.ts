@@ -2,15 +2,15 @@ import { HCS10Client } from '../hcs10/HCS10Client';
 import { AgentMetadata } from '../hcs10/types';
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { RegisteredAgent } from '../demo-state';
 
 /**
  * RegisterAgentTool wraps the createAndRegisterAgent() function of HCS10Client.
  * It creates and registers an agent on Hedera using the HCS-10 standard SDK flow.
+ * On success, returns a JSON string containing the new agent's details (including private key).
  */
 export class RegisterAgentTool extends StructuredTool {
     name = 'register_agent';
-    description = 'Creates and registers the AI agent on the Hedera network following the HCS-10 standard.';
+    description = 'Creates and registers the AI agent on the Hedera network. Returns JSON string with agent details (accountId, privateKey, topics) on success.';
     private client: HCS10Client;
 
     schema = z.object({
@@ -30,9 +30,9 @@ export class RegisterAgentTool extends StructuredTool {
 
     /**
      * Calls createAndRegisterAgent() with the provided metadata.
-     * Returns the details of the registered agent.
+     * Returns a JSON string with agent details on success, or an error string.
      */
-    async _call(input: z.infer<typeof this.schema>): Promise<RegisteredAgent | string> {
+    async _call(input: z.infer<typeof this.schema>): Promise<string> {
         const metadata: AgentMetadata = {
             name: input.name,
             description: input.description,
@@ -47,19 +47,23 @@ export class RegisterAgentTool extends StructuredTool {
             const inboundTopicId = result?.metadata?.inboundTopicId;
             const outboundTopicId = result?.metadata?.outboundTopicId;
             const profileTopicId = result?.metadata?.profileTopicId;
+            const privateKey = result?.metadata?.privateKey;
 
-            if (!accountId || !inboundTopicId || !outboundTopicId) {
-                return 'Error: Registration failed. The HCS client returned incomplete details.';
+            if (!accountId || !inboundTopicId || !outboundTopicId || !privateKey) {
+                return `Error: Registration failed. The HCS client returned incomplete details (Missing: ${[!accountId && 'accountId', !inboundTopicId && 'inboundTopicId', !outboundTopicId && 'outboundTopicId', !privateKey && 'privateKey'].filter(Boolean).join(', ')}).`;
             }
 
-            const registeredAgent: RegisteredAgent = {
+            const registrationDetails = {
+                success: true,
+                message: `Successfully registered agent '${input.name}'.`,
                 name: input.name,
                 accountId: accountId,
+                privateKey: privateKey,
                 inboundTopicId: inboundTopicId,
                 outboundTopicId: outboundTopicId,
-                profileTopicId: profileTopicId
+                profileTopicId: profileTopicId || 'N/A',
             };
-            return registeredAgent;
+            return JSON.stringify(registrationDetails);
         } catch (error) {
             return `Error: Failed to create/register agent "${input.name}". Reason: ${error instanceof Error ? error.message : String(error)}`;
         }
