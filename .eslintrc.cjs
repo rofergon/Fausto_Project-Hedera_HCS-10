@@ -18,7 +18,6 @@ module.exports = {
     'prefer-const': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'warn',
     '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/ban-ts-comment': 'error',
     '@typescript-eslint/naming-convention': [
       'error',
       {
@@ -45,41 +44,6 @@ module.exports = {
     'arrow-body-style': ['error', 'as-needed'],
     'no-unused-vars': 'off',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-    'spaced-comment': [
-      'error',
-      'always',
-      {
-        line: {
-          markers: ['/'],
-          exceptions: ['-', '+', '*'],
-        },
-        block: {
-          markers: ['!'],
-          exceptions: ['*'],
-          balanced: true,
-        },
-      },
-    ],
-    'multiline-comment-style': ['error', 'starred-block'],
-    'lines-around-comment': [
-      'error',
-      {
-        beforeBlockComment: true,
-        afterBlockComment: false,
-        beforeLineComment: true,
-        afterLineComment: false,
-        allowBlockStart: true,
-        allowBlockEnd: false,
-        allowObjectStart: true,
-        allowObjectEnd: false,
-        allowArrayStart: true,
-        allowArrayEnd: false,
-        allowClassStart: true,
-        allowClassEnd: false,
-        applyDefaultIgnorePatterns: true,
-        ignorePattern: '^\\s*(?:\\/\\*\\*|\\*)\\s+',
-      },
-    ],
   },
   overrides: [
     {
