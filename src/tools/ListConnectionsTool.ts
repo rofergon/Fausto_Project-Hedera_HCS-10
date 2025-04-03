@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   OpenConvaiState as StateManagerInterface,
   ActiveConnection,
-} from '../open-convai-state';
+} from '../state/open-convai-state';
 
 export interface ListConnectionsToolParams extends ToolParams {
   stateManager: StateManagerInterface;

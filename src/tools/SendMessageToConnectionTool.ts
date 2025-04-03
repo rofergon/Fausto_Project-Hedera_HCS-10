@@ -3,8 +3,8 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { OpenConvaiState as StateManagerInterface } from '../open-convai-state';
-import { Logger } from '../utils/logger'; // Assuming logger utility
+import { OpenConvaiState as StateManagerInterface } from '../state/open-convai-state';
+import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
 export interface SendMessageToConnectionToolParams extends ToolParams {
   hcsClient: HCS10Client;
