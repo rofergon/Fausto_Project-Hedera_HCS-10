@@ -64,12 +64,15 @@ export class RegisterAgentTool extends StructuredTool {
       const outboundTopicId = result?.metadata?.outboundTopicId;
       const profileTopicId = result?.metadata?.profileTopicId;
       const privateKey = result?.metadata?.privateKey;
-      await updateEnvFile(ENV_FILE_PATH, {
-        TODD_ACCOUNT_ID: result?.metadata?.accountId,
-        TODD_PRIVATE_KEY: result?.metadata?.privateKey,
-        TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
-        TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
-      });
+
+      if (privateKey && accountId && inboundTopicId && outboundTopicId) {
+        await updateEnvFile(ENV_FILE_PATH, {
+          TODD_ACCOUNT_ID: result?.metadata?.accountId,
+          TODD_PRIVATE_KEY: result?.metadata?.privateKey,
+          TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
+          TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
+        });
+      }
 
       await ensureAgentHasEnoughHbar(
         Logger.getInstance({
