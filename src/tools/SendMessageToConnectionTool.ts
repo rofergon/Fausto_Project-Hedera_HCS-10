@@ -89,13 +89,11 @@ export class SendMessageToConnectionTool extends StructuredTool {
 
       if (replyBack) {
         this.logger.info(`Got reply from ${targetAgentName}`, replyBack);
-        return JSON.stringify({
-          message: replyBack,
-          source: targetAgentName,
-        });
+        // Format the return string clearly as an observation/reply
+        return `Received reply from ${targetAgentName}: ${replyBack}`;
       }
 
-      // Return message based on the status string
+      // Return message based on the status string if no reply was received/awaited
       return `Message sent to ${targetAgentName} (${connection.targetAccountId}) via connection ${connectionTopicId}. Sequence Number: ${sequenceNumber}`;
     } catch (error) {
       this.logger.error(
