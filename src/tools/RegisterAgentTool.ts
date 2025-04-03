@@ -66,6 +66,8 @@ export class RegisterAgentTool extends StructuredTool {
         TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
       });
 
+      this.client.setClient(accountId, privateKey);
+
       if (!accountId || !inboundTopicId || !outboundTopicId || !privateKey) {
         return `Error: Registration failed. The HCS client returned incomplete details (Missing: ${[
           !accountId && 'accountId',
