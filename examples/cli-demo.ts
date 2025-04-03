@@ -6,6 +6,8 @@ import readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { updateEnvFile } from './utils';
+import { ENV_FILE_PATH } from './utils';
 
 dotenv.config();
 
@@ -157,6 +159,13 @@ async function registerNewAgent() {
       profileTopicId: result.metadata.profileTopicId,
       operatorPrivateKey: result.metadata.privateKey,
     };
+
+    await updateEnvFile(ENV_FILE_PATH, {
+      TODD_ACCOUNT_ID: result?.metadata?.accountId,
+      TODD_PRIVATE_KEY: result?.metadata?.privateKey,
+      TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
+      TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
+    });
 
     registeredAgents.push(newAgent);
     console.log('\nRegistration Successful!');
