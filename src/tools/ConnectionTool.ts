@@ -13,28 +13,29 @@ export interface ConnectionToolParams extends ToolParams {
 }
 
 /**
- * ConnectionTool monitors an agent's inbound topic for connection requests
+ * ConnectionTool monitors the *current* agent's inbound topic for connection requests
  * and automatically handles them using the HCS-10 standard SDK flow.
+ * Use this ONLY to passively LISTEN for other agents trying to connect TO YOU.
+ * This tool takes NO arguments and does NOT start outgoing connections.
  */
 export class ConnectionTool extends StructuredTool {
     name = 'monitor_connections';
-    description = "Starts monitoring an agent's inbound topic for HCS-10 connection requests and handles them automatically.";
+    // Even more explicit description
+    description = "Starts passively LISTENING on the current agent's own inbound topic for INCOMING HCS-10 connection requests. Handles received requests automatically. Takes NO arguments. DO NOT use this to start a new connection TO someone else.";
     private client: HCS10Client;
     private logger: Logger;
     private demoState: DemoState; // Added demoState property
     private isMonitoring: boolean = false; // Flag to prevent multiple monitors
     private monitoringTopic: string | null = null;
 
-    // Schema requires the inbound topic ID of the agent to monitor
-    schema = z.object({
-        inboundTopicId: z.string().describe("The Hedera topic ID of the agent's inbound channel to monitor for connection requests.")
-    });
+    // Schema now takes NO arguments
+    schema = z.object({});
 
     /**
      * @param client - Instance of HCS10Client.
      * @param demoState - Instance of DemoState for shared state management.
      */
-    constructor({ client, demoState, ...rest }: ConnectionToolParams) { // Updated constructor signature
+    constructor({ client, demoState, ...rest }: ConnectionToolParams) {
         super(rest);
         this.client = client;
         this.demoState = demoState; // Store demoState
@@ -43,9 +44,23 @@ export class ConnectionTool extends StructuredTool {
 
     /**
      * Initiates the connection request monitoring process in the background.
+     * Gets the inbound topic ID from the configured client.
      */
     async _call(input: z.infer<typeof this.schema>): Promise<string> {
-        const { inboundTopicId } = input;
+        // Get inboundTopicId from the client
+        let inboundTopicId: string;
+        try {
+            // Assuming getInboundTopicId() is implemented and available
+            inboundTopicId = await this.client.getInboundTopicId();
+        } catch (error) {
+            const errorMsg = `Error getting inbound topic ID for monitoring: ${error instanceof Error ? error.message : String(error)}`;
+            this.logger.error(errorMsg);
+            return errorMsg;
+        }
+
+        if (!inboundTopicId) {
+            return `Error: Could not determine the inbound topic ID for the current agent.`;
+        }
 
         if (this.isMonitoring) {
             if (this.monitoringTopic === inboundTopicId) {
