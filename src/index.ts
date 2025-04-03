@@ -2,12 +2,12 @@ import { HCS10Client, StandardNetworkType } from './hcs10/HCS10Client';
 import { RegisterAgentTool } from './tools/RegisterAgentTool';
 import { SendMessageTool } from './tools/SendMessageTool';
 import { ConnectionTool } from './tools/ConnectionTool';
-import { OpenConvaiState as StateManagerInterface } from './state/open-convai-state';
+import { IStateManager } from './state/open-convai-state';
 
 export interface HCS10InitializationOptions {
   useEncryption?: boolean;
   registryUrl?: string;
-  stateManager?: StateManagerInterface;
+  stateManager?: IStateManager;
 }
 
 /**
@@ -74,7 +74,7 @@ export async function initializeHCS10Client(
   }
   const connectionTool = new ConnectionTool({
     client: hcs10Client,
-    stateManager: options?.stateManager as StateManagerInterface,
+    stateManager: options?.stateManager as IStateManager,
   });
 
   return {
@@ -89,3 +89,4 @@ export async function initializeHCS10Client(
 
 export * from './hcs10';
 export * from './tools';
+export * from './state';

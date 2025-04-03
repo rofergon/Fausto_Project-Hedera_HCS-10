@@ -1,18 +1,20 @@
 import * as dotenv from 'dotenv';
 import readline from 'readline';
 
-// --- HCS-10 Imports ---
-import { HCS10Client, StandardNetworkType } from '../src/hcs10/HCS10Client';
-// Use the renamed state class
-import { OpenConvaiState } from '../src/state/open-convai-state';
-import { CheckMessagesTool } from '../src/tools/CheckMessagesTool';
-import { ConnectionTool } from '../src/tools/ConnectionTool';
-import { InitiateConnectionTool } from '../src/tools/InitiateConnectionTool';
-import { ListConnectionsTool } from '../src/tools/ListConnectionsTool';
-import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
-import { SendMessageToConnectionTool } from '../src/tools/SendMessageToConnectionTool';
-import { SendMessageTool } from '../src/tools/SendMessageTool';
-import { FindRegistrationsTool } from '../src/tools/FindRegistrationsTool';
+import {
+  HCS10Client,
+  StandardNetworkType,
+  IStateManager,
+  OpenConvaiState,
+  CheckMessagesTool,
+  ConnectionTool,
+  RegisterAgentTool,
+  FindRegistrationsTool,
+  InitiateConnectionTool,
+  ListConnectionsTool,
+  SendMessageToConnectionTool,
+  SendMessageTool,
+} from '@hashgraphonline/standards-agent-kit';
 
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
@@ -45,7 +47,7 @@ Remember the connection numbers when listing connections, as users might refer t
 
 // --- Global Variables ---
 let hcsClient: HCS10Client;
-let stateManager: OpenConvaiState; // Use renamed class and variable name
+let stateManager: IStateManager; // Use renamed class and variable name
 let agentExecutor: AgentExecutor;
 let memory: ConversationTokenBufferMemory;
 let connectionMonitor: ConnectionTool | null = null;

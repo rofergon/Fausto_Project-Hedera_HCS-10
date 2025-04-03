@@ -13,12 +13,21 @@ export interface ActiveConnection {
   connectionTopicId: string;
 }
 
+export interface IStateManager {
+  setCurrentAgent(agent: RegisteredAgent | null): void;
+  getCurrentAgent(): RegisteredAgent | null;
+  addActiveConnection(connection: ActiveConnection): void;
+  listConnections(): ActiveConnection[];
+  getConnectionByIdentifier(identifier: string): ActiveConnection | undefined;
+  getLastTimestamp(connectionTopicId: string): number;
+  updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
+}
+
 /**
- * Holds shared state, primarily for demonstration purposes.
- * Tools can use an instance of this (or a similar custom class)
- * via their `stateManager` constructor parameter to track connections.
+ * An example implementation of the `IStateManager` interface.
+ * All tools should have a state manager instance.
  */
-export class OpenConvaiState {
+export class OpenConvaiState implements IStateManager {
   currentAgent: RegisteredAgent | null = null;
   activeConnections: ActiveConnection[] = [];
   // Store last processed consensus timestamp (in nanoseconds) for message polling
