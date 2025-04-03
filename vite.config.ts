@@ -3,6 +3,16 @@ import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import path from 'path';
 
+const externalDependencies = [
+  '@hashgraph/proto',
+  '@hashgraph/sdk',
+  'fetch-retry',
+  'fs',
+  'path',
+  'url',
+  'crypto',
+];
+
 export default defineConfig({
   build: {
     lib: {
@@ -14,7 +24,7 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
-      external: ['fs', 'path', 'url', 'crypto'],
+      external: externalDependencies,
       input: {
         main: path.resolve(__dirname, 'src/index.ts'),
       },
@@ -22,8 +32,10 @@ export default defineConfig({
   },
   plugins: [
     dts({
-      insertTypesEntry: true, // Create a single index.d.ts entry point
-      outDir: 'dist', // Ensure types go into the dist directory
+      insertTypesEntry: true,
+      include: ['src/**/*.ts'],
+      exclude: ['**/*.d.ts'],
+      outDir: 'dist',
     }),
   ],
   resolve: {
@@ -31,5 +43,8 @@ export default defineConfig({
       // Add aliases if needed, e.g., for src directory
       // '@': path.resolve(__dirname, './src'),
     },
+  },
+  ssr: {
+    external: externalDependencies,
   },
 });

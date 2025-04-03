@@ -3,8 +3,8 @@ import readline from 'readline';
 
 // --- HCS-10 Imports ---
 import { HCS10Client, StandardNetworkType } from '../src/hcs10/HCS10Client';
-// Use the actual DemoState from the src directory
-import { DemoState } from '../src/demo-state';
+// Use the renamed state class
+import { OpenConvaiState } from '../src/open-convai-state';
 import { CheckMessagesTool } from '../src/tools/CheckMessagesTool';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
 import { InitiateConnectionTool } from '../src/tools/InitiateConnectionTool';
@@ -16,13 +16,13 @@ import { SendMessageTool } from '../src/tools/SendMessageTool';
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
 import { AgentExecutor, createOpenAIToolsAgent } from 'langchain/agents';
-import { ConversationTokenBufferMemory } from 'langchain/memory'; // Corrected import
+import { ConversationTokenBufferMemory } from 'langchain/memory';
 import {
   ChatPromptTemplate,
   MessagesPlaceholder,
 } from '@langchain/core/prompts';
-import { BaseMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
+import { HCS11Profile, ProfileResponse } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
@@ -42,7 +42,7 @@ Remember the connection numbers when listing connections, as users might refer t
 
 // --- Global Variables ---
 let hcsClient: HCS10Client;
-let demoState: DemoState; // Instance of IMPORTED DemoState
+let stateManager: OpenConvaiState; // Use renamed class and variable name
 let agentExecutor: AgentExecutor;
 let memory: ConversationTokenBufferMemory;
 let connectionMonitor: ConnectionTool | null = null;
@@ -52,15 +52,16 @@ async function initialize() {
   console.log('Initializing HCS-10 LangChain Agent...');
   try {
     // --- Load Environment Variables ---
-    const operatorId = process.env.OPERATOR_ID;
-    const operatorKey = process.env.OPERATOR_PRIVATE_KEY;
-    const network = process.env.HEDERA_NETWORK || 'testnet';
-    const registryUrl = process.env.REGISTRY_URL || 'https://moonscape.tech';
-    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const operatorId = process.env.HEDERA_OPERATOR_ID!;
+    const operatorKey = process.env.HEDERA_PRIVATE_KEY!;
+    const network = (process.env.HEDERA_NETWORK ||
+      'testnet') as StandardNetworkType;
+    const openaiApiKey = process.env.OPENAI_API_KEY!;
+    const registryUrl = process.env.REGISTRY_URL;
 
     if (!operatorId || !operatorKey) {
       throw new Error(
-        'OPERATOR_ID and OPERATOR_PRIVATE_KEY must be set in .env for initial client setup.'
+        'HEDERA_OPERATOR_ID and HEDERA_PRIVATE_KEY must be set in .env for initial client setup.'
       );
     }
     if (!openaiApiKey) {
@@ -77,40 +78,80 @@ async function initialize() {
     const standardNetwork: StandardNetworkType = hederaNetwork;
 
     // --- Initialize HCS Client and State ---
-    // Correct HCS10Client instantiation (no logger option)
     hcsClient = new HCS10Client(operatorId, operatorKey, standardNetwork, {
       useEncryption: false,
       registryUrl: registryUrl,
     });
 
+    const monitoringHcsClient = new HCS10Client(
+      operatorId,
+      operatorKey,
+      standardNetwork,
+      {
+        useEncryption: false,
+        registryUrl: registryUrl,
+        logLevel: 'error',
+      }
+    );
+
+    // Instantiate the renamed state class
+    stateManager = new OpenConvaiState();
+
+    // Use TODD details if available, now using setClient
     if (process.env.TODD_PRIVATE_KEY && process.env.TODD_ACCOUNT_ID) {
+      console.log(
+        `Setting client identity to TODD: ${process.env.TODD_ACCOUNT_ID}`
+      );
       hcsClient.setClient(
         process.env.TODD_ACCOUNT_ID,
         process.env.TODD_PRIVATE_KEY
       );
+      monitoringHcsClient.setClient(
+        process.env.TODD_ACCOUNT_ID,
+        process.env.TODD_PRIVATE_KEY
+      );
+      const toddProfile = (await hcsClient.retrieveProfile(
+        process.env.TODD_ACCOUNT_ID
+      )) as ProfileResponse;
+      if (toddProfile.success && toddProfile.topicInfo) {
+        stateManager.setCurrentAgent({
+          name: (toddProfile.profile as HCS11Profile).display_name,
+          accountId: process.env.TODD_ACCOUNT_ID,
+          inboundTopicId: toddProfile.topicInfo.inboundTopic,
+          outboundTopicId: toddProfile.topicInfo.outboundTopic,
+        });
+      } else {
+        console.warn(
+          'Could not retrieve TODD profile, using operator details.'
+        );
+      }
+    } else {
+      console.log(`Using initial operator identity: ${operatorId}`);
     }
 
     console.log(
-      `HCS client configured for operator ${operatorId} on ${standardNetwork}.`
+      `HCS client configured for operator ${hcsClient.getOperatorId()} on ${standardNetwork}.`
     );
 
-    // Instantiate the imported DemoState
-    demoState = new DemoState();
-
-    // --- Instantiate Tools as an Array ---
+    // --- Instantiate Tools as an Array, passing stateManager via demoState ---
     const tools: StructuredToolInterface[] = [
       new RegisterAgentTool(hcsClient),
-      new InitiateConnectionTool({ hcsClient, demoState }),
-      new ListConnectionsTool({ demoState }),
-      new SendMessageToConnectionTool({ hcsClient, demoState }),
-      new CheckMessagesTool({ hcsClient, demoState }),
+      new InitiateConnectionTool({ hcsClient, stateManager: stateManager }),
+      new ListConnectionsTool({ stateManager: stateManager }),
+      new SendMessageToConnectionTool({
+        hcsClient,
+        stateManager: stateManager,
+      }),
+      new CheckMessagesTool({ hcsClient, stateManager: stateManager }),
       new SendMessageTool(hcsClient),
-      new ConnectionTool({ client: hcsClient, demoState }),
+      new ConnectionTool({
+        client: monitoringHcsClient,
+        stateManager: stateManager,
+      }),
     ];
-    // Get a reference to the connection tool if needed
     connectionMonitor = tools.find(
       (tool) => tool instanceof ConnectionTool
-    ) as ConnectionTool;
+    ) as ConnectionTool | null;
 
     console.log('Tools initialized.');
 
@@ -121,7 +162,6 @@ async function initialize() {
       temperature: 0,
     });
 
-    // Corrected memory instantiation
     memory = new ConversationTokenBufferMemory({
       llm: llm,
       memoryKey: 'chat_history',
@@ -139,49 +179,43 @@ async function initialize() {
 
     const agent = await createOpenAIToolsAgent({
       llm,
-      tools, // Pass the array
+      tools,
       prompt,
     });
 
     agentExecutor = new AgentExecutor({
       agent,
-      tools, // Pass the array
+      tools,
       memory,
       verbose: false,
     });
 
-    console.log('LangChain agent initialized.');
+    runMonitoring();
 
-    // --- Start Connection Monitoring ---
-    if (connectionMonitor) {
-      console.log('Attempting to start background connection monitoring...');
-      try {
-        const inboundTopicId = await hcsClient.getInboundTopicId(); // Fetch the operator's topic ID
-        // Start monitoring asynchronously - don't await it
-        connectionMonitor
-          ._call({ inboundTopicId }) // Start the internal monitoring loop
-          .then((result) =>
-            console.log(`Background connection monitor status: ${result}`)
-          )
-          .catch((error) =>
-            // Log error but don't crash the main app
-            console.error(
-              'Background connection monitor failed to start or encountered an error:',
-              error
-            )
-          );
-      } catch (err) {
-        console.error('Could not get inbound topic ID to start monitor:', err);
-        console.warn('Connection monitoring could not be started.');
-      }
-    } else {
-      console.warn('ConnectionTool instance not found, cannot monitor.');
-    }
+    console.log('LangChain agent initialized.');
   } catch (error) {
     console.error('Initialization failed:', error);
     process.exit(1);
   }
 }
+
+const runMonitoring = async () => {
+  // --- Start Connection Monitoring ---
+  if (connectionMonitor) {
+    console.log('Attempting to start background connection monitoring...');
+    try {
+      // _call now internally gets the topic ID
+      await connectionMonitor._call({}); // Start the internal monitoring loop
+      console.log('Background connection monitor initiated.');
+      // No need to await the background process itself
+    } catch (err) {
+      console.error('Could not get inbound topic ID to start monitor:', err);
+      console.warn('Connection monitoring could not be started.');
+    }
+  } else {
+    console.warn('ConnectionTool instance not found, cannot monitor.');
+  }
+};
 
 // --- Chat Loop ---
 async function chatLoop() {
@@ -201,7 +235,6 @@ async function chatLoop() {
     if (userInput.toLowerCase() === 'exit') {
       console.log('Exiting chat...');
       rl.close();
-      // Attempt to stop monitoring
       if (
         connectionMonitor &&
         typeof connectionMonitor.stopMonitoring === 'function'
@@ -214,10 +247,7 @@ async function chatLoop() {
 
     try {
       console.log('Agent thinking...');
-      // Invoke the agent executor
       const result = await agentExecutor.invoke({ input: userInput });
-
-      // Print the agent's response
       console.log(`Agent: ${result.output}`);
     } catch (error) {
       console.error('Error during agent execution:', error);

@@ -14,10 +14,17 @@ import {
   WaitForConnectionConfirmationResponse,
   ProfileResponse,
   HCSMessage,
+  LogLevel,
 } from '@hashgraphonline/standards-sdk';
 
 import { AgentMetadata, AgentChannels } from './types';
 import { encryptMessage } from '../utils/Encryption';
+
+export interface HCSMessageWithTimestamp extends HCSMessage {
+  timestamp: number;
+  data: string;
+  sequence_number: number;
+}
 
 // Add pfp details to AgentMetadata type definition
 export interface ExtendedAgentMetadata extends AgentMetadata {
@@ -58,7 +65,11 @@ export class HCS10Client {
     operatorPrivateKey: string,
     // Restrict network type to what the standard SDK expects
     network: StandardNetworkType,
-    options?: { useEncryption?: boolean; registryUrl?: string }
+    options?: {
+      useEncryption?: boolean;
+      registryUrl?: string;
+      logLevel?: LogLevel;
+    }
   ) {
     // Instantiate the standard SDK client using the imported class
     // The passed 'network' now matches the expected type
@@ -67,6 +78,7 @@ export class HCS10Client {
       operatorId: operatorId,
       operatorPrivateKey: operatorPrivateKey,
       guardedRegistryBaseUrl: options?.registryUrl,
+      logLevel: options?.logLevel,
       // Add other necessary config options based on StandardSDKClient constructor if needed
     });
     this.guardedRegistryBaseUrl = options?.registryUrl || '';
@@ -141,7 +153,10 @@ export class HCS10Client {
     // Assuming standardClient has a submitConnectionRequest that returns a receipt or similar.
     // If not, this needs refactoring to build the payload and use submitPayload.
     // Let's *assume* for now it exists and returns a receipt for the first message submission.
-    return this.standardClient.submitConnectionRequest(inboundTopicId, memo);
+    return this.standardClient.submitConnectionRequest(
+      inboundTopicId,
+      memo
+    ) as any; // Type cast to resolve SDK version conflicts
   }
 
   /**
@@ -263,7 +278,7 @@ export class HCS10Client {
     data: string,
     memo?: string,
     submitKey?: PrivateKey // Use imported PrivateKey type
-  ): Promise<string> {
+  ): Promise<number | undefined> {
     // Encrypt the final payload string if needed
     if (this.useEncryption) {
       data = encryptMessage(data);
@@ -275,9 +290,9 @@ export class HCS10Client {
         topicId,
         data,
         memo,
-        submitKey
+        submitKey as any // Type cast to avoid SDK version conflicts
       );
-      return messageResponse.status.toString();
+      return messageResponse.topicSequenceNumber?.toNumber();
     } catch (error) {
       console.error(`Error sending message to topic ${topicId}:`, error);
       throw new Error(
@@ -295,29 +310,21 @@ export class HCS10Client {
    * @returns Messages from the topic, mapped to the expected format.
    */
   public async getMessages(topicId: string): Promise<{
-    messages: Array<{
-      timestamp: number;
-      data: string;
-      sequence_number: number;
-    }>;
+    messages: HCSMessageWithTimestamp[];
   }> {
-    // ... (implementation remains the same, uses this.standardClient)
     try {
-      // Assuming standardClient.getMessages returns an object with a messages array
-      // structured like { messages: [{ consensus_timestamp: '...', data: '...', sequence_number: ... }] }
       const result = await this.standardClient.getMessages(topicId);
 
-      // Add type to sdkMessage to resolve potential linter warning if needed
       const mappedMessages = result.messages.map((sdkMessage) => {
         const timestamp = sdkMessage?.created?.getTime() || 0;
 
         return {
+          ...sdkMessage,
           timestamp: timestamp,
           data: sdkMessage.data, // Assume data is directly usable or needs decoding based on standardClient
           sequence_number: sdkMessage.sequence_number, // Ensure sequence number is included
         };
       });
-      // Sort messages by timestamp just in case they aren't ordered
       mappedMessages.sort(
         (a: { timestamp: number }, b: { timestamp: number }) =>
           a.timestamp - b.timestamp

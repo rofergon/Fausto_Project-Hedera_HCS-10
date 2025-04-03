@@ -3,12 +3,12 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { DemoState } from '../demo-state';
+import { OpenConvaiState as StateManagerInterface } from '../open-convai-state';
 import { Logger } from '../utils/logger'; // Assuming logger utility
 
 export interface SendMessageToConnectionToolParams extends ToolParams {
   hcsClient: HCS10Client;
-  demoState: DemoState;
+  stateManager: StateManagerInterface;
 }
 
 /**
@@ -17,7 +17,7 @@ export interface SendMessageToConnectionToolParams extends ToolParams {
 export class SendMessageToConnectionTool extends StructuredTool {
   name = 'send_message_to_connection';
   description =
-    "Sends a text message to another agent using an existing active connection. Identify the target agent using their account ID (e.g., 0.0.12345) or the connection number shown in 'list_connections'.";
+    "Sends a text message to another agent using an existing active connection. Identify the target agent using their account ID (e.g., 0.0.12345) or the connection number shown in 'list_connections'. Return back the reply from the target agent if possible";
   schema = z.object({
     targetIdentifier: z
       .string()
@@ -28,17 +28,17 @@ export class SendMessageToConnectionTool extends StructuredTool {
   });
 
   private hcsClient: HCS10Client;
-  private demoState: DemoState;
+  private stateManager: StateManagerInterface;
   private logger: Logger;
 
   constructor({
     hcsClient,
-    demoState,
+    stateManager,
     ...rest
   }: SendMessageToConnectionToolParams) {
     super(rest);
     this.hcsClient = hcsClient;
-    this.demoState = demoState;
+    this.stateManager = stateManager;
     this.logger = Logger.getInstance({ module: 'SendMessageToConnectionTool' });
   }
 
@@ -46,13 +46,13 @@ export class SendMessageToConnectionTool extends StructuredTool {
     targetIdentifier,
     message,
   }: z.infer<this['schema']>): Promise<string> {
-    const currentAgent = this.demoState.getCurrentAgent();
+    const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
       return 'Error: Cannot send message. No agent is currently active. Please register or select an agent first.';
     }
 
     const connection =
-      this.demoState.getConnectionByIdentifier(targetIdentifier);
+      this.stateManager.getConnectionByIdentifier(targetIdentifier);
     if (!connection) {
       return `Error: Could not find an active connection matching identifier "${targetIdentifier}". Use 'list_connections' to see active connections.`;
     }
@@ -69,16 +69,34 @@ export class SendMessageToConnectionTool extends StructuredTool {
 
     try {
       // Call sendMessage with correct arguments
-      const statusString = await this.hcsClient.sendMessage(
+      const sequenceNumber = await this.hcsClient.sendMessage(
         connectionTopicId,
         message, // Message content as 'data'
         `Agent message from ${currentAgent.name}` // Optional memo
       );
 
-      this.logger.debug(`Message sent. Status: ${statusString}`);
+      if (!sequenceNumber) {
+        throw new Error('Failed to send message');
+      }
+
+      this.logger.info(`Message sent. Sequence Number: ${sequenceNumber}`);
+
+      const replyBack = await this.monitorResponses(
+        connectionTopicId,
+        operatorId,
+        sequenceNumber
+      );
+
+      if (replyBack) {
+        this.logger.info(`Got reply from ${targetAgentName}`, replyBack);
+        return JSON.stringify({
+          message: replyBack,
+          source: targetAgentName,
+        });
+      }
 
       // Return message based on the status string
-      return `Message sent to ${targetAgentName} (${connection.targetAccountId}) via connection ${connectionTopicId}. Status: ${statusString}`;
+      return `Message sent to ${targetAgentName} (${connection.targetAccountId}) via connection ${connectionTopicId}. Sequence Number: ${sequenceNumber}`;
     } catch (error) {
       this.logger.error(
         `Failed to send message via connection ${connectionTopicId}: ${error}`
@@ -87,5 +105,36 @@ export class SendMessageToConnectionTool extends StructuredTool {
         error instanceof Error ? error.message : String(error)
       }`;
     }
+  }
+
+  private async monitorResponses(
+    topicId: string,
+    operatorId: string,
+    sequenceNumber: number
+  ): Promise<string | null> {
+    const maxAttempts = 30;
+    const attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        const messages = await this.hcsClient.getMessageStream(topicId);
+
+        for (const message of messages.messages) {
+          if (
+            message.sequence_number < sequenceNumber ||
+            message.operator_id === operatorId
+          ) {
+            continue;
+          }
+          const content = await this.hcsClient.getMessageContent(message.data);
+
+          return content;
+        }
+      } catch (error) {
+        this.logger.error(`Error monitoring responses: ${error}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+    return null;
   }
 }
