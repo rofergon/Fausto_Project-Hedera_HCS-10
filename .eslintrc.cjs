@@ -18,23 +18,6 @@ module.exports = {
     'prefer-const': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'warn',
     '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/naming-convention': [
-      'error',
-      {
-        selector: 'interface',
-        format: ['PascalCase'],
-        prefix: ['I'],
-      },
-      {
-        selector: 'typeAlias',
-        format: ['PascalCase'],
-      },
-      {
-        selector: 'typeParameter',
-        format: ['PascalCase'],
-        prefix: ['T'],
-      },
-    ],
     'block-scoped-var': 'error',
     curly: ['error', 'all'],
     eqeqeq: ['error', 'always'],
