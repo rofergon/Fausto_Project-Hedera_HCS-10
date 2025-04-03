@@ -1,6 +1,6 @@
 {
   "name": "@hashgraphonline/standards-agent-kit",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "description": "An Agents implementation of Hashgraph Online's Standards SDK",
   "type": "module",
   "main": "./dist/index.es.js",
