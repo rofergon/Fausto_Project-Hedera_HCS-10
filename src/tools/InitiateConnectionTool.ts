@@ -1,7 +1,10 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { OpenConvaiState as StateManagerInterface, ActiveConnection } from '../open-convai-state';
+import {
+  OpenConvaiState as StateManagerInterface,
+  ActiveConnection,
+} from '../open-convai-state';
 import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
 export interface InitiateConnectionToolParams extends ToolParams {
@@ -54,16 +57,17 @@ export class InitiateConnectionTool extends StructuredTool {
       `Attempting connection from ${currentAgent.accountId} to ${targetAccountId}`
     );
 
-    let localConnectionId: number | null = null;
-
     try {
       this.logger.debug(`Retrieving profile for ${targetAccountId}...`);
-      const targetProfile = await this.hcsClient.retrieveProfile(targetAccountId);
+      const targetProfile = await this.hcsClient.retrieveProfile(
+        targetAccountId
+      );
       if (!targetProfile?.topicInfo?.inboundTopic) {
         return `Error: Could not retrieve profile or find inbound topic ID for target agent ${targetAccountId}. They might not be registered or have a public profile.`;
       }
       const targetInboundTopicId = targetProfile.topicInfo.inboundTopic;
-      const targetAgentName = targetProfile.profile.name || `Agent ${targetAccountId}`;
+      const targetAgentName =
+        targetProfile.profile.name || `Agent ${targetAccountId}`;
 
       const requestResult = await this.hcsClient.submitConnectionRequest(
         targetInboundTopicId,
@@ -78,7 +82,9 @@ export class InitiateConnectionTool extends StructuredTool {
             throw new Error('Converted sequence number is NaN.');
           }
         } catch (conversionError) {
-          throw new Error('Failed to convert connection request sequence number.');
+          throw new Error(
+            `Failed to convert connection request sequence number: ${conversionError}`
+          );
         }
       } else {
         throw new Error('Connection request sequence number not found.');
@@ -87,15 +93,18 @@ export class InitiateConnectionTool extends StructuredTool {
       const confirmationTimeoutMs = 60000;
       const delayMs = 2000;
       const maxAttempts = Math.ceil(confirmationTimeoutMs / delayMs);
-      const confirmationResult = await this.hcsClient.waitForConnectionConfirmation(
-        currentAgent.outboundTopicId,
-        connectionRequestId,
-        maxAttempts,
-        delayMs
-      );
+      const confirmationResult =
+        await this.hcsClient.waitForConnectionConfirmation(
+          targetInboundTopicId,
+          connectionRequestId,
+          maxAttempts,
+          delayMs
+        );
 
       if (!confirmationResult?.connectionTopicId) {
-        return `Error: Connection confirmation not received from ${targetAccountId} (for request ${connectionRequestId}) within ${confirmationTimeoutMs / 1000} seconds.`;
+        return `Error: Connection confirmation not received from ${targetAccountId} (for request ${connectionRequestId}) within ${
+          confirmationTimeoutMs / 1000
+        } seconds.`;
       }
 
       const connectionTopicId = confirmationResult.connectionTopicId;
@@ -108,15 +117,24 @@ export class InitiateConnectionTool extends StructuredTool {
         connectionTopicId: connectionTopicId,
       };
       this.stateManager.addActiveConnection(newConnection);
+
+      // Find the newly added connection to get its implicit ID (index+1) for the return message
       const connections = this.stateManager.listConnections();
-      const addedEntry = connections.find(c => c.connectionTopicId === connectionTopicId);
-      localConnectionId = addedEntry ? connections.indexOf(addedEntry) + 1 : null;
+      const addedEntry = connections.find(
+        (c) => c.connectionTopicId === connectionTopicId
+      );
+      const localConnectionId = addedEntry
+        ? connections.indexOf(addedEntry) + 1
+        : null;
 
       const idString = localConnectionId ? `#${localConnectionId}` : '';
       return `Successfully established connection ${idString} with ${targetAgentName} (${targetAccountId}). Connection Topic: ${connectionTopicId}. You can now send messages using this connection.`;
     } catch (error) {
       this.logger.error(`Connection initiation failed: ${error}`);
-      return `Error initiating connection with ${targetAccountId}: ${error instanceof Error ? error.message : String(error)}`;
+      // No state was added for pending connection, so no cleanup needed here
+      return `Error initiating connection with ${targetAccountId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
   }
 }

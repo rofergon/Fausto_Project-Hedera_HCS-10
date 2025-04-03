@@ -51,9 +51,10 @@ async function initialize() {
   console.log('Initializing HCS-10 LangChain Agent...');
   try {
     // --- Load Environment Variables ---
-    const operatorId = process.env.OPERATOR_ID!;
-    const operatorKey = process.env.OPERATOR_PRIVATE_KEY!;
-    const network = (process.env.HEDERA_NETWORK || 'testnet') as StandardNetworkType;
+    const operatorId = process.env.HEDERA_OPERATOR_ID!;
+    const operatorKey = process.env.HEDERA_PRIVATE_KEY!;
+    const network = (process.env.HEDERA_NETWORK ||
+      'testnet') as StandardNetworkType;
     const openaiApiKey = process.env.OPENAI_API_KEY!;
     const registryUrl = process.env.REGISTRY_URL;
 
@@ -81,55 +82,50 @@ async function initialize() {
       registryUrl: registryUrl,
     });
 
+    // Instantiate the renamed state class
+    stateManager = new OpenConvaiState();
+
     // Use TODD details if available, now using setClient
     if (process.env.TODD_PRIVATE_KEY && process.env.TODD_ACCOUNT_ID) {
-        console.log(`Setting client identity to TODD: ${process.env.TODD_ACCOUNT_ID}`);
-        hcsClient.setClient(
-            process.env.TODD_ACCOUNT_ID,
-            process.env.TODD_PRIVATE_KEY
+      console.log(
+        `Setting client identity to TODD: ${process.env.TODD_ACCOUNT_ID}`
+      );
+      hcsClient.setClient(
+        process.env.TODD_ACCOUNT_ID,
+        process.env.TODD_PRIVATE_KEY
+      );
+      const toddProfile = await hcsClient.retrieveProfile(
+        process.env.TODD_ACCOUNT_ID
+      );
+      if (toddProfile.success && toddProfile.topicInfo) {
+        stateManager.setCurrentAgent({
+          name: toddProfile.profile.name,
+          accountId: process.env.TODD_ACCOUNT_ID,
+          inboundTopicId: toddProfile.topicInfo.inboundTopic,
+          outboundTopicId: toddProfile.topicInfo.outboundTopic,
+        });
+      } else {
+        console.warn(
+          'Could not retrieve TODD profile, using operator details.'
         );
+      }
     } else {
-         console.log(`Using initial operator identity: ${operatorId}`);
+      console.log(`Using initial operator identity: ${operatorId}`);
     }
 
     console.log(
       `HCS client configured for operator ${hcsClient.getOperatorId()} on ${standardNetwork}.`
     );
 
-    // Instantiate the renamed state class
-    stateManager = new OpenConvaiState();
-    // Set the initial agent in the state if not TODD (useful for ConnectionTool)
-     if (!(process.env.TODD_PRIVATE_KEY && process.env.TODD_ACCOUNT_ID)) {
-        try {
-            const initialInboundTopicId = await hcsClient.getInboundTopicId();
-            // Attempt to retrieve profile to get outbound topic ID
-            let initialOutboundTopicId = 'unknown-outbound';
-            try {
-                 const profileResponse = await hcsClient.retrieveProfile(hcsClient.getOperatorId());
-                 if (profileResponse.success && profileResponse.topicInfo?.outboundTopic) {
-                     initialOutboundTopicId = profileResponse.topicInfo.outboundTopic;
-                 }
-            } catch (profileError) {
-                 console.warn('Could not retrieve profile to determine outbound topic for initial operator.');
-            }
-
-            stateManager.setCurrentAgent({
-                name: `Operator ${hcsClient.getOperatorId()}`,
-                accountId: hcsClient.getOperatorId(),
-                inboundTopicId: initialInboundTopicId,
-                outboundTopicId: initialOutboundTopicId,
-            });
-        } catch (err) {
-            console.warn('Could not set initial operator agent in state, likely needs registration first:', err);
-        }
-     }
-
     // --- Instantiate Tools as an Array, passing stateManager via demoState ---
     const tools: StructuredToolInterface[] = [
       new RegisterAgentTool(hcsClient),
       new InitiateConnectionTool({ hcsClient, stateManager: stateManager }),
       new ListConnectionsTool({ stateManager: stateManager }),
-      new SendMessageToConnectionTool({ hcsClient, stateManager: stateManager }),
+      new SendMessageToConnectionTool({
+        hcsClient,
+        stateManager: stateManager,
+      }),
       new CheckMessagesTool({ hcsClient, stateManager: stateManager }),
       new SendMessageTool(hcsClient),
       new ConnectionTool({ client: hcsClient, stateManager: stateManager }),
