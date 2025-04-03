@@ -151,7 +151,7 @@ Make sure you have configured your `.env` file correctly.
 3.  **Run the LangChain Interactive Demo:**
     This demo uses LangChain to create an agent that can use the HCS-10 tools. Requires `OPENAI_API_KEY` in `.env`.
     ```bash
-    npm run interactive
+    npm run langchain-demo
     ```
 
 ## Project Structure
@@ -161,7 +161,7 @@ Make sure you have configured your `.env` file correctly.
 ├── dist/               # Compiled JavaScript output
 ├── examples/           # Demo usage scripts
 │   ├── cli-demo.ts     # Interactive CLI demo
-│   ├── interactive-demo.ts # LangChain agent interactive demo
+│   ├── langchain-demo.ts # LangChain agent interactive demo
 │   └── ...
 ├── src/                # Source code
 │   ├── hcs10/          # HCS-10 client and types
