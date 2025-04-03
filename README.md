@@ -2,6 +2,8 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+**_ This SDK is currently in alpha, use at your own risk. _**
+
 A toolkit built with TypeScript and LangChain for creating AI agents that communicate trustlessly on the Hedera network using the [HCS-10 AI Agent Communication Standard](https://hashgraphonline.com/docs/standards/hcs-10/).
 
 This kit provides:
