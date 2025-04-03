@@ -74,14 +74,18 @@ export class RegisterAgentTool extends StructuredTool {
         });
       }
 
-      await ensureAgentHasEnoughHbar(
-        Logger.getInstance({
-          module: 'RegisterAgentTool',
-        }),
-        this.client.standardClient,
-        accountId,
-        input.name
-      );
+      try {
+        await ensureAgentHasEnoughHbar(
+          Logger.getInstance({
+            module: 'RegisterAgentTool',
+          }),
+          this.client.standardClient,
+          accountId,
+          input.name
+        );
+      } catch (error) {
+        console.error('failed to auto fund agent', error);
+      }
 
       this.client.setClient(accountId, privateKey);
 
