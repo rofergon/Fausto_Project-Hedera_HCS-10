@@ -8,6 +8,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { updateEnvFile } from './utils';
 import { ENV_FILE_PATH } from './utils';
+import { AIAgentCapability } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
@@ -68,6 +69,30 @@ function displayAgentInfo(agent: RegisteredAgent | null) {
   }
 }
 
+// Helper function to display available capabilities
+function displayCapabilities() {
+  displayHeader('Available Agent Capabilities');
+  console.log('  0: TEXT_GENERATION - Generate coherent, human-like text');
+  console.log('  1: IMAGE_GENERATION - Create visual content based on prompts');
+  console.log('  2: AUDIO_GENERATION - Synthesize speech, music, or soundscapes');
+  console.log('  3: VIDEO_GENERATION - Produce dynamic visual content');
+  console.log('  4: CODE_GENERATION - Produce code based on text prompts');
+  console.log('  5: LANGUAGE_TRANSLATION - Convert text between languages');
+  console.log('  6: SUMMARIZATION_EXTRACTION - Distill content into concise summaries');
+  console.log('  7: KNOWLEDGE_RETRIEVAL - Access and reason with structured data');
+  console.log('  8: DATA_INTEGRATION - Aggregate and visualize data sources');
+  console.log('  9: MARKET_INTELLIGENCE - Analyze financial and economic data');
+  console.log(' 10: TRANSACTION_ANALYTICS - Monitor and analyze transactions');
+  console.log(' 11: SMART_CONTRACT_AUDIT - Evaluate decentralized code');
+  console.log(' 12: GOVERNANCE_FACILITATION - Support decentralized decision-making');
+  console.log(' 13: SECURITY_MONITORING - Detect and respond to security threats');
+  console.log(' 14: COMPLIANCE_ANALYSIS - Ensure regulatory adherence');
+  console.log(' 15: FRAUD_DETECTION - Identify and mitigate fraudulent activities');
+  console.log(' 16: MULTI_AGENT_COORDINATION - Enable collaboration between agents');
+  console.log(' 17: API_INTEGRATION - Connect with external systems and services');
+  console.log(' 18: WORKFLOW_AUTOMATION - Automate routine tasks and processes');
+}
+
 // --- Agent Actions ---
 async function registerNewAgent() {
   displayHeader('Register New Agent');
@@ -76,6 +101,39 @@ async function registerNewAgent() {
   const model = await question(
     'Enter agent model identifier (optional, e.g., gpt-4o): '
   );
+  
+  // Display capabilities and let user select
+  displayCapabilities();
+  console.log('\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): ');
+  const capabilitiesInput = await question('> ');
+  
+  let capabilities: number[] = [AIAgentCapability.TEXT_GENERATION]; // Default
+  
+  if (capabilitiesInput.trim()) {
+    try {
+      capabilities = capabilitiesInput
+        .split(',')
+        .map(num => {
+          const parsed = parseInt(num.trim(), 10);
+          if (isNaN(parsed) || parsed < 0 || parsed > 18) {
+            throw new Error(`Invalid capability number: ${num.trim()}`);
+          }
+          return parsed;
+        });
+      
+      if (capabilities.length === 0) {
+        console.log('No valid capabilities selected, defaulting to TEXT_GENERATION only.');
+        capabilities = [AIAgentCapability.TEXT_GENERATION];
+      }
+    } catch (error) {
+      console.error(`Error parsing capabilities: ${error instanceof Error ? error.message : error}`);
+      console.log('Defaulting to TEXT_GENERATION capability only.');
+      capabilities = [AIAgentCapability.TEXT_GENERATION];
+    }
+  }
+  
+  console.log(`Selected capabilities: ${capabilities.join(', ')}`);
+  
   const pfpPath = await question(
     'Enter the path to the profile picture file (relative to project root, e.g., logo.png): '
   );
@@ -131,6 +189,7 @@ async function registerNewAgent() {
     description,
     model,
     type: 'autonomous', // Defaulting to autonomous
+    capabilities, // Add the selected capabilities
     pfpBuffer, // Add the buffer
     pfpFileName, // Add the filename
   };

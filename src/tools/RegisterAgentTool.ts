@@ -1,4 +1,4 @@
-import { Logger } from '@hashgraphonline/standards-sdk';
+import { AIAgentCapability, Logger } from '@hashgraphonline/standards-sdk';
 import {
   ensureAgentHasEnoughHbar,
   ENV_FILE_PATH,
@@ -34,6 +34,10 @@ export class RegisterAgentTool extends StructuredTool {
       .string()
       .optional()
       .describe('Optional model identifier for the agent'),
+    capabilities: z
+      .array(z.number())
+      .optional()
+      .describe('Optional array of AIAgentCapability enum values (0-18). If not provided, defaults to just TEXT_GENERATION (0)'),
   });
 
   /**
@@ -54,6 +58,7 @@ export class RegisterAgentTool extends StructuredTool {
       description: input.description,
       type: input.type,
       model: input.model,
+      capabilities: input.capabilities || [AIAgentCapability.TEXT_GENERATION],
     };
 
     try {
@@ -108,6 +113,7 @@ export class RegisterAgentTool extends StructuredTool {
         inboundTopicId: inboundTopicId,
         outboundTopicId: outboundTopicId,
         profileTopicId: profileTopicId || 'N/A',
+        capabilities: metadata.capabilities,
       };
       return JSON.stringify(registrationDetails);
     } catch (error) {

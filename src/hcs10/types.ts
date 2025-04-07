@@ -7,8 +7,9 @@ export interface AgentMetadata {
     name: string;
     description?: string;
     contact?: string;
-    type?: string;
+    type?: 'autonomous' | 'manual';
     model?: string;
+    capabilities?: number[];
     social?: Record<string, string>;
     properties?: Record<string, unknown>;
 }

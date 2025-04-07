@@ -193,10 +193,9 @@ export class HCS10Client {
     builder
       .setName(metadata.name)
       .setDescription(metadata.description || '')
-      .setCapabilities([
-        StandardAIAgentCapability.TEXT_GENERATION, // Use imported enum
-        // Add other capabilities as needed
-      ])
+      .setCapabilities(
+        metadata.capabilities ? metadata.capabilities : [StandardAIAgentCapability.TEXT_GENERATION]
+      )
       .setAgentType((metadata.type || 'autonomous') as 'autonomous' | 'manual')
       .setModel(metadata.model || 'agent-model-2024')
       .setNetwork(this.getNetwork())
