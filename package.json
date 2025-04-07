@@ -1,10 +1,16 @@
 {
   "name": "@hashgraphonline/standards-agent-kit",
-  "version": "0.0.9",
-  "description": "An Agents implementation of Hashgraph Online's Standards SDK",
+  "version": "0.0.11",
+  "description": "A modular SDK for building on-chain autonomous agents using Hashgraph Online Standards, including HCS-10 for agent discovery and communication.",
   "type": "module",
   "main": "./dist/index.es.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.es.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -23,15 +29,52 @@
   "keywords": [
     "hedera",
     "hcs10",
-    "langchain",
+    "hcs6",
+    "hcs7",
+    "standards",
     "sdk",
-    "ai-agent"
+    "agent",
+    "agentkit",
+    "ai-agent",
+    "autonomous-agent",
+    "hashgraph",
+    "web3",
+    "langchain",
+    "multi-agent",
+    "hapi",
+    "onchain"
   ],
   "author": "Hashgraph Online",
+  "contributors": [
+    {
+      "name": "Michael Kantor",
+      "email": "michael@hashgraphonline.com"
+    }
+  ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hashgraphonline/standards-agent-kit"
+  },
+  "bugs": {
+    "url": "https://github.com/hashgraphonline/standards-agent-kit/issues"
+  },
+  "homepage": "https://hashgraphonline.com/docs/libraries/standards-agent-kit/",
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/hashgraph-online"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false,
+  "readmeFilename": "README.md",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@hashgraph/sdk": "^2.62.0",
-    "@hashgraphonline/standards-sdk": "0.0.62",
+    "@hashgraphonline/standards-sdk": "0.0.67",
     "@langchain/community": "^0.3.37",
     "@langchain/openai": "^0.5.1",
     "dotenv": "^16.4.1",
@@ -41,7 +84,6 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@hashgraphonline/standards-agent-kit": "^0.0.9",
     "@swc/core": "^1.11.16",
     "@swc/jest": "^0.2.36",
     "@types/jest": "^29.5.11",
