@@ -44,13 +44,7 @@
     "hapi",
     "onchain"
   ],
-  "author": "Hashgraph Online",
-  "contributors": [
-    {
-      "name": "Michael Kantor",
-      "email": "michael@hashgraphonline.com"
-    }
-  ],
+  "author": "Hashgraph Online <hello@hashgraphonline.com>",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
