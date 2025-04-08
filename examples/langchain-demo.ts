@@ -115,7 +115,7 @@ async function initialize() {
         process.env.TODD_ACCOUNT_ID,
         process.env.TODD_PRIVATE_KEY
       );
-      const toddProfile = (await hcsClient.retrieveProfile(
+      const toddProfile = (await hcsClient.getAgentProfile(
         process.env.TODD_ACCOUNT_ID
       )) as ProfileResponse;
       if (toddProfile.success && toddProfile.topicInfo) {

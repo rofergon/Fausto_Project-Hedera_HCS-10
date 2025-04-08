@@ -2,7 +2,6 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import {
-  AgentMetadata,
   Logger,
   RegistrationSearchOptions,
 } from '@hashgraphonline/standards-sdk';

@@ -2,6 +2,11 @@ import * as dotenv from 'dotenv';
 import { initializeHCS10Client } from '../src/index';
 import { HCS10Client, ExtendedAgentMetadata } from '../src/hcs10/HCS10Client';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
+import { ListConnectionsTool } from '../src/tools/ListConnectionsTool';
+import { InitiateConnectionTool } from '../src/tools/InitiateConnectionTool';
+import { SendMessageToConnectionTool } from '../src/tools/SendMessageToConnectionTool';
+import { CheckMessagesTool } from '../src/tools/CheckMessagesTool';
+import { OpenConvaiState } from '../src/state/open-convai-state';
 import readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -34,11 +39,10 @@ interface ActiveConnection {
 }
 
 let hcsClient: HCS10Client;
-let connectionTool: ConnectionTool;
+let connectionTool: ConnectionTool; // Keep this global since it manages state for monitoring
 let currentAgent: RegisteredAgent | null = null;
 const registeredAgents: RegisteredAgent[] = [];
-let activeConnections: ActiveConnection[] = [];
-let connectionMessageTimestamps: { [connectionTopicId: string]: number } = {}; // Store last processed consensus timestamp (nanos)
+let stateManager: OpenConvaiState;
 let isMonitoring = false; // Track monitoring status explicitly
 
 // --- Readline Setup ---
@@ -74,23 +78,41 @@ function displayCapabilities() {
   displayHeader('Available Agent Capabilities');
   console.log('  0: TEXT_GENERATION - Generate coherent, human-like text');
   console.log('  1: IMAGE_GENERATION - Create visual content based on prompts');
-  console.log('  2: AUDIO_GENERATION - Synthesize speech, music, or soundscapes');
+  console.log(
+    '  2: AUDIO_GENERATION - Synthesize speech, music, or soundscapes'
+  );
   console.log('  3: VIDEO_GENERATION - Produce dynamic visual content');
   console.log('  4: CODE_GENERATION - Produce code based on text prompts');
   console.log('  5: LANGUAGE_TRANSLATION - Convert text between languages');
-  console.log('  6: SUMMARIZATION_EXTRACTION - Distill content into concise summaries');
-  console.log('  7: KNOWLEDGE_RETRIEVAL - Access and reason with structured data');
+  console.log(
+    '  6: SUMMARIZATION_EXTRACTION - Distill content into concise summaries'
+  );
+  console.log(
+    '  7: KNOWLEDGE_RETRIEVAL - Access and reason with structured data'
+  );
   console.log('  8: DATA_INTEGRATION - Aggregate and visualize data sources');
   console.log('  9: MARKET_INTELLIGENCE - Analyze financial and economic data');
   console.log(' 10: TRANSACTION_ANALYTICS - Monitor and analyze transactions');
   console.log(' 11: SMART_CONTRACT_AUDIT - Evaluate decentralized code');
-  console.log(' 12: GOVERNANCE_FACILITATION - Support decentralized decision-making');
-  console.log(' 13: SECURITY_MONITORING - Detect and respond to security threats');
+  console.log(
+    ' 12: GOVERNANCE_FACILITATION - Support decentralized decision-making'
+  );
+  console.log(
+    ' 13: SECURITY_MONITORING - Detect and respond to security threats'
+  );
   console.log(' 14: COMPLIANCE_ANALYSIS - Ensure regulatory adherence');
-  console.log(' 15: FRAUD_DETECTION - Identify and mitigate fraudulent activities');
-  console.log(' 16: MULTI_AGENT_COORDINATION - Enable collaboration between agents');
-  console.log(' 17: API_INTEGRATION - Connect with external systems and services');
-  console.log(' 18: WORKFLOW_AUTOMATION - Automate routine tasks and processes');
+  console.log(
+    ' 15: FRAUD_DETECTION - Identify and mitigate fraudulent activities'
+  );
+  console.log(
+    ' 16: MULTI_AGENT_COORDINATION - Enable collaboration between agents'
+  );
+  console.log(
+    ' 17: API_INTEGRATION - Connect with external systems and services'
+  );
+  console.log(
+    ' 18: WORKFLOW_AUTOMATION - Automate routine tasks and processes'
+  );
 }
 
 // --- Agent Actions ---
@@ -101,39 +123,45 @@ async function registerNewAgent() {
   const model = await question(
     'Enter agent model identifier (optional, e.g., gpt-4o): '
   );
-  
+
   // Display capabilities and let user select
   displayCapabilities();
-  console.log('\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): ');
+  console.log(
+    '\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): '
+  );
   const capabilitiesInput = await question('> ');
-  
+
   let capabilities: number[] = [AIAgentCapability.TEXT_GENERATION]; // Default
-  
+
   if (capabilitiesInput.trim()) {
     try {
-      capabilities = capabilitiesInput
-        .split(',')
-        .map(num => {
-          const parsed = parseInt(num.trim(), 10);
-          if (isNaN(parsed) || parsed < 0 || parsed > 18) {
-            throw new Error(`Invalid capability number: ${num.trim()}`);
-          }
-          return parsed;
-        });
-      
+      capabilities = capabilitiesInput.split(',').map((num) => {
+        const parsed = parseInt(num.trim(), 10);
+        if (isNaN(parsed) || parsed < 0 || parsed > 18) {
+          throw new Error(`Invalid capability number: ${num.trim()}`);
+        }
+        return parsed;
+      });
+
       if (capabilities.length === 0) {
-        console.log('No valid capabilities selected, defaulting to TEXT_GENERATION only.');
+        console.log(
+          'No valid capabilities selected, defaulting to TEXT_GENERATION only.'
+        );
         capabilities = [AIAgentCapability.TEXT_GENERATION];
       }
     } catch (error) {
-      console.error(`Error parsing capabilities: ${error instanceof Error ? error.message : error}`);
+      console.error(
+        `Error parsing capabilities: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
       console.log('Defaulting to TEXT_GENERATION capability only.');
       capabilities = [AIAgentCapability.TEXT_GENERATION];
     }
   }
-  
+
   console.log(`Selected capabilities: ${capabilities.join(', ')}`);
-  
+
   const pfpPath = await question(
     'Enter the path to the profile picture file (relative to project root, e.g., logo.png): '
   );
@@ -246,6 +274,9 @@ async function registerNewAgent() {
         `\nAgent "${currentAgent.name}" automatically selected as active agent.`
       );
     }
+
+    // Update the state manager with the current agent
+    stateManager.setCurrentAgent(currentAgent);
   } catch (error) {
     console.error('\nError registering agent:', error);
   }
@@ -292,8 +323,7 @@ async function selectActiveAgent() {
     isMonitoring = false;
   }
   // Reset active connections when switching agents
-  activeConnections = [];
-  connectionMessageTimestamps = {};
+  stateManager.setCurrentAgent(currentAgent);
   console.log('Active connections cleared for the new agent.');
 }
 
@@ -374,88 +404,27 @@ async function initiateConnection() {
     return;
   }
 
-  if (activeConnections.some((c) => c.targetAccountId === targetAccountId)) {
-    console.log(`Already have an active connection with ${targetAccountId}.`);
+  if (stateManager.listConnections().some((c) => c.targetAccountId === targetAccountId && !c.isPending && !c.needsConfirmation)) {
+    console.log(`Already have an established connection with ${targetAccountId}.`);
     return;
   }
 
   try {
-    console.log(`\nAttempting to retrieve profile for ${targetAccountId}...`);
-    const profileResponse = await hcsClient.retrieveProfile(targetAccountId);
+    console.log(`
+Initiating connection to ${targetAccountId}...`);
 
-    if (
-      !profileResponse.success ||
-      !profileResponse.profile ||
-      !profileResponse.topicInfo?.inboundTopic
-    ) {
-      console.error(
-        `Failed to retrieve profile or inbound topic for ${targetAccountId}:`,
-        profileResponse.error || 'Incomplete profile data'
-      );
-      return;
-    }
+    // Create the InitiateConnectionTool on demand with current hcsClient
+    const initiateConnectionTool = new InitiateConnectionTool({ 
+      hcsClient, 
+      stateManager 
+    });
+    const result = await initiateConnectionTool._call({ targetAccountId });
 
-    const targetInboundTopicId = profileResponse.topicInfo.inboundTopic;
-    const targetAgentName = profileResponse.profile.name || targetAccountId; // Use name if available
-    console.log(
-      `Found target agent "${targetAgentName}" with inbound topic ${targetInboundTopicId}.`
-    );
+    console.log(result);
 
-    console.log(`Submitting connection request to ${targetAgentName}...`);
-    const memo = `Connection request from ${currentAgent.name}`;
-
-    // Use the standard SDK client method directly
-    const receipt = await hcsClient.submitConnectionRequest(
-      targetInboundTopicId,
-      memo
-    );
-
-    const connectionRequestId = receipt.topicSequenceNumber?.toNumber();
-
-    if (!connectionRequestId) {
-      console.error(
-        'Connection request submitted, but failed to get the request sequence number from the receipt.',
-        receipt
-      );
-      return;
-    }
-
-    console.log(
-      `Connection request submitted successfully to topic ${targetInboundTopicId}. Request ID: ${connectionRequestId}.`
-    );
-    console.log(
-      `Waiting for confirmation from ${targetAgentName} on your outbound topic (${currentAgent.outboundTopicId})...`
-    );
-
-    // Wait for the connection_created message on *our* outbound topic
-    const confirmation = await hcsClient.waitForConnectionConfirmation(
-      targetInboundTopicId,
-      connectionRequestId,
-      60, // attempts (e.g., 60 attempts * 5s = 5 minutes)
-      5000 // delay ms
-    );
-
-    console.log('\nConnection Confirmed!');
-    console.log(`  Connection Topic ID: ${confirmation.connectionTopicId}`);
-    console.log(`  Confirmed By: ${confirmation.confirmedBy}`);
-    console.log(
-      `  Confirmation Sequence Number: ${confirmation.sequence_number}`
-    );
-    console.log(`  Confirmation Memo: ${confirmation.memo}`);
-
-    // Store the connection
-    const newConnection: ActiveConnection = {
-      targetAccountId: targetAccountId,
-      targetAgentName: targetAgentName,
-      targetInboundTopicId: targetInboundTopicId,
-      connectionTopicId: confirmation.connectionTopicId,
-    };
-    activeConnections.push(newConnection);
-    connectionMessageTimestamps[newConnection.connectionTopicId] =
-      Date.now() * 1_000_000; // Initialize timestamp roughly (use consensus time if possible)
   } catch (error) {
     console.error(
-      '\nError initiating connection:',
+      '\nUnexpected error during connection initiation:',
       error instanceof Error ? error.message : error
     );
   }
@@ -467,39 +436,92 @@ async function listActiveConnections() {
     console.log('No active agent selected.');
     return;
   }
-  if (activeConnections.length === 0) {
-    console.log(`No active connections established for ${currentAgent.name}.`);
-    return;
-  }
 
-  console.log(
-    `Connections for ${currentAgent.name} (${currentAgent.accountId}):`
-  );
-  activeConnections.forEach((conn, index) => {
-    console.log(
-      `${index + 1}. To: ${conn.targetAgentName} (${conn.targetAccountId})`
-    );
-    console.log(`     Connection Topic: ${conn.connectionTopicId}`);
-  });
+  try {
+    console.log(`Fetching connections for ${currentAgent.name} (${currentAgent.accountId})...`);
+
+    if (!stateManager) {
+        console.error('State manager is not initialized!');
+        return;
+    }
+    
+    // Create the ListConnectionsTool on demand with current hcsClient
+    const listTool = new ListConnectionsTool({ stateManager, hcsClient });
+
+    const connectionListOutput = await listTool._call({
+      includeDetails: true,
+      showPending: true,
+    });
+
+    console.log(connectionListOutput);
+
+  } catch (error) {
+    console.error('\\nError listing connections using ListConnectionsTool:', error);
+  }
 }
 
 // --- Messaging Actions ---
 async function selectConnection(
   promptMessage: string
 ): Promise<ActiveConnection | null> {
-  if (activeConnections.length === 0) {
+  // Instead of directly using stateManager.listConnections(), which might not be in sync,
+  // we'll use the listConnectionsTool to ensure we have the most up-to-date connections
+  if (!currentAgent) {
+    console.log('No active agent selected.');
+    return null;
+  }
+
+  // First refresh connections using the same tool as option 7
+  try {
+    // Create the ListConnectionsTool on demand with current hcsClient
+    const listTool = new ListConnectionsTool({ stateManager, hcsClient });
+    await listTool._call({
+      includeDetails: false,
+      showPending: true
+    });
+  } catch (error) {
+    console.error('Error refreshing connections:', error);
+    // Continue with what we have in state, even if refresh failed
+  }
+
+  // Now get the updated list from state manager
+  const currentConnections = stateManager.listConnections();
+  console.log(`Found ${currentConnections.length} connections in state manager.`);
+
+  if (currentConnections.length === 0) {
     console.log('No active connections available.');
     return null;
   }
-  await listActiveConnections();
+  displayHeader('Select Connection');
+  console.log(
+    `Connections for ${currentAgent?.name} (${currentAgent?.accountId}):`
+  );
+  // Log all connections for debugging
+  currentConnections.forEach((conn, index) => {
+    console.log(
+      `${index + 1}. To: ${conn.targetAgentName} (${conn.targetAccountId})`
+    );
+    console.log(`     Connection Topic: ${conn.connectionTopicId}`);
+    // Determine status in a more readable way without nested ternary
+    let statusDisplay = conn.status || 'unknown';
+    if (conn.isPending) {
+      statusDisplay = 'pending';
+    } else if (conn.needsConfirmation) {
+      statusDisplay = 'needs confirmation';
+    } else if (!statusDisplay || statusDisplay === 'unknown') {
+      statusDisplay = 'established';
+    }
+    console.log(`     Status: ${statusDisplay}`);
+  });
+
   const choice = await question(promptMessage);
   const index = parseInt(choice) - 1;
 
-  if (isNaN(index) || index < 0 || index >= activeConnections.length) {
+  if (isNaN(index) || index < 0 || index >= currentConnections.length) {
     console.log('Invalid choice.');
     return null;
   }
-  return activeConnections[index];
+  return currentConnections[index];
 }
 
 async function sendMessageToConnection() {
@@ -523,19 +545,24 @@ async function sendMessageToConnection() {
   }
 
   try {
-    console.log(
-      `Sending message to ${connection.targetAgentName} via topic ${connection.connectionTopicId}...`
-    );
-    // Use sendMessage directly from HCS10Client - arguments match the updated wrapper
-    await hcsClient.sendMessage(
-      connection.connectionTopicId,
-      messageContent,
-      `Message from ${currentAgent.name}` // Optional memo
-      // submitKey is omitted, assuming default operator key is sufficient
-    );
-    console.log('Message sent successfully.');
+    console.log(`Sending message to ${connection.targetAgentName}...`);
+    
+    // Create the SendMessageToConnectionTool on demand with current hcsClient
+    const sendMessageToConnectionTool = new SendMessageToConnectionTool({ 
+      hcsClient, 
+      stateManager 
+    });
+    const result = await sendMessageToConnectionTool._call({
+      targetIdentifier: connection.targetAccountId,
+      message: messageContent
+    });
+
+    console.log(result);
   } catch (error) {
-    console.error('\nError sending message:', error);
+    console.error(
+      '\nUnexpected error sending message:',
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
@@ -554,75 +581,23 @@ async function viewMessagesFromConnection() {
   }
 
   try {
-    console.log(
-      `Checking for new messages from ${connection.targetAgentName} on topic ${connection.connectionTopicId}...`
-    );
-    const result = await hcsClient.getMessages(connection.connectionTopicId);
-    const lastProcessedTimestamp =
-      connectionMessageTimestamps[connection.connectionTopicId] || 0;
-    let newMessagesFound = false;
-    let maxTimestamp = lastProcessedTimestamp;
+    console.log(`Checking for messages from ${connection.targetAgentName}...`);
+    
+    // Create the CheckMessagesTool on demand with current hcsClient
+    const checkMessagesTool = new CheckMessagesTool({ 
+      hcsClient, 
+      stateManager 
+    });
+    const result = await checkMessagesTool._call({
+      targetIdentifier: connection.connectionTopicId
+    });
 
-    if (result.messages.length === 0) {
-      console.log('No messages found on this connection topic yet.');
-      return;
-    }
-
-    for (const msg of result.messages) {
-      // Convert message timestamp (ms) to approximate nanoseconds for comparison
-      const msgTimestampNanos = msg.timestamp * 1_000_000;
-
-      if (msgTimestampNanos > lastProcessedTimestamp) {
-        newMessagesFound = true;
-        let content = msg.data;
-
-        // Check if data is an inscription ID
-        if (typeof content === 'string' && content.startsWith('hcs://')) {
-          console.log(`  Resolving inscribed message ${content}...`);
-          try {
-            content = await hcsClient.getMessageContent(content);
-          } catch (resolveError) {
-            console.error(`    Error resolving inscription: ${resolveError}`);
-            content = `[Error resolving inscription ${content}]`;
-          }
-        }
-
-        // Try parsing JSON, otherwise display raw content
-        let displayContent = content;
-        try {
-          const parsed = JSON.parse(content);
-          // Look for standard HCS-10 message structure
-          if (parsed.p === 'hcs-10' && parsed.op === 'message') {
-            const senderOpId = parsed.operator_id || 'unknown_sender';
-            displayContent = `${senderOpId}: ${parsed.data}`;
-          } else {
-            // If not standard structure, pretty-print JSON
-            displayContent = JSON.stringify(parsed, null, 2);
-          }
-        } catch (e) {
-          // Not JSON, display as is
-        }
-
-        const messageDate = new Date(msg.timestamp);
-        console.log(
-          `\n[${messageDate.toLocaleString()}] (Seq: ${msg.sequence_number})`
-        );
-        console.log(`${displayContent}`);
-
-        if (msgTimestampNanos > maxTimestamp) {
-          maxTimestamp = msgTimestampNanos;
-        }
-      }
-    }
-
-    if (!newMessagesFound) {
-      console.log('No new messages since last check.');
-    } else {
-      // Update the timestamp for this connection
-      connectionMessageTimestamps[connection.connectionTopicId] = maxTimestamp;
-    }
+    console.log(result);
   } catch (error) {
-    console.error('\nError fetching messages:', error);
+    console.error(
+      '\nUnexpected error checking messages:',
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
@@ -691,6 +666,7 @@ async function showMenu() {
       if (isMonitoring) {
         console.log('Stopping connection monitoring...');
         connectionTool.stopMonitoring();
+        isMonitoring = false;
       }
       rl.close();
       return; // Stop loop
@@ -706,12 +682,15 @@ async function showMenu() {
 async function main() {
   console.log('Initializing HCS10 client...');
   try {
+    stateManager = new OpenConvaiState();
     const initResult = await initializeHCS10Client({
       useEncryption: false, // Keep encryption off for simplicity in demo
       registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+      stateManager: stateManager,
     });
     hcsClient = initResult.hcs10Client;
     connectionTool = initResult.tools.connectionTool;
+    // No global tool creation here - tools will be created on demand
     console.log('Client initialized successfully.');
 
     const toddAccountId = process.env.TODD_ACCOUNT_ID;
@@ -751,6 +730,9 @@ async function main() {
         }
       );
       console.log(`Client reconfigured for active agent: ${currentAgent.name}`);
+
+      // Update the state manager with the current agent
+      stateManager.setCurrentAgent(currentAgent);
     } else {
       console.log(
         'Todd agent details not found in environment variables. Register or select an agent manually.'

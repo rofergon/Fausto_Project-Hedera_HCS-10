@@ -12,7 +12,7 @@ import {
   AIAgentCapability as StandardAIAgentCapability,
   AgentRegistrationResult,
   WaitForConnectionConfirmationResponse,
-  ProfileResponse,
+  ProfileResponse as SDKProfileResponse, // Alias to avoid potential future clashes
   HCSMessage,
   LogLevel,
 } from '@hashgraphonline/standards-sdk';
@@ -83,6 +83,7 @@ export class HCS10Client {
     });
     this.guardedRegistryBaseUrl = options?.registryUrl || '';
     this.useEncryption = options?.useEncryption || false;
+    this.operatorPrivateKey = operatorPrivateKey;
   }
 
   // Add public getter for operatorId
@@ -131,10 +132,9 @@ export class HCS10Client {
   }
 
   /**
-   * Exposes the standard SDK's retrieveProfile method.
+   * Retrieves the profile for a given account ID using the standard SDK.
    */
-  public async retrieveProfile(accountId: string): Promise<ProfileResponse> {
-    // Use 'any' or infer if possible
+  public async getAgentProfile(accountId: string): Promise<SDKProfileResponse> {
     return this.standardClient.retrieveProfile(accountId);
   }
 
@@ -378,7 +378,7 @@ export class HCS10Client {
       console.log(
         `[HCS10Client] Retrieving profile for operator ${operatorId} to find inbound topic...`
       );
-      const profileResponse = await this.retrieveProfile(operatorId);
+      const profileResponse = await this.getAgentProfile(operatorId);
       if (profileResponse.success && profileResponse.topicInfo?.inboundTopic) {
         console.log(
           `[HCS10Client] Found inbound topic for operator ${operatorId}: ${profileResponse.topicInfo.inboundTopic}`
@@ -410,6 +410,31 @@ export class HCS10Client {
       // Rethrow with the improved message
       throw new Error(detailedMessage);
     }
+  }
+
+  /**
+   * Retrieves the configured operator account ID and private key.
+   * Required by tools needing to identify the current agent instance.
+   */
+  public getAccountAndSigner(): { accountId: string; signer: PrivateKey } {
+      return this.standardClient.getAccountAndSigner();
+  }
+
+  /**
+   * Retrieves the outbound topic ID for the current operator.
+   * Fetches the operator's profile if necessary.
+   * @returns The outbound topic ID string.
+   * @throws If the outbound topic cannot be determined.
+   */
+  public async getOutboundTopicId(): Promise<string> {
+      const operatorId = this.getOperatorId();
+      // Use the getAgentProfile method we just added
+      const profile = await this.getAgentProfile(operatorId);
+      if (profile.success && profile.topicInfo?.outboundTopic) {
+          return profile.topicInfo.outboundTopic;
+      } else {
+          throw new Error(`Could not retrieve outbound topic from profile for ${operatorId}. Profile success: ${profile.success}, Error: ${profile.error}`);
+      }
   }
 
   public setClient(accountId: string, privateKey: string): StandardSDKClient {
