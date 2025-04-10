@@ -1,5 +1,5 @@
 import * as dotenv from 'dotenv';
-import { initializeHCS10Client } from '../src/index';
+import { HCS10Tools, initializeHCS10Client, IStateManager } from '../src/index';
 import { HCS10Client } from '../src/hcs10/HCS10Client';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
 import { ConnectionMonitorTool } from '../src/tools/ConnectionMonitorTool';
@@ -13,12 +13,15 @@ import { ListUnapprovedConnectionRequestsTool } from '../src/tools/ListUnapprove
 import { OpenConvaiState } from '../src/state/open-convai-state';
 import readline from 'readline';
 import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { updateEnvFile } from './utils';
 
 dotenv.config();
 
-// const __filename = fileURLToPath(import.meta.url); // Unused
-// const __dirname = path.dirname(__filename); // Unused
-// const projectRoot = path.join(__dirname, '..'); // Unused
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.join(__dirname, '..');
 
 // --- Interfaces & State ---
 interface RegisteredAgent {
@@ -433,157 +436,6 @@ async function confirmFeeConfiguration(): Promise<boolean> {
     return false;
   }
   return true;
-}
-
-// --- Agent Actions ---
-async function registerNewAgent() {
-  displayHeader('Register New Agent');
-  const name = await question('Enter agent name: ');
-  const description = await question('Enter agent description (optional): ');
-  const model = await question(
-    'Enter agent model identifier (optional, e.g., gpt-4o): '
-  );
-
-  if (!name) {
-    console.error('Agent name is required.');
-    return;
-  }
-
-  // Display capabilities and let user select
-  displayCapabilities();
-  console.log(
-    '\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): '
-  );
-  const capabilitiesInput = await question('> ');
-  let capabilities: number[] | undefined = undefined;
-  try {
-    if (capabilitiesInput.trim()) {
-      capabilities = capabilitiesInput.split(',').map((num) => {
-        const parsed = parseInt(num.trim(), 10);
-        if (isNaN(parsed) || parsed < 0 || parsed > 18) {
-          throw new Error(`Invalid capability number: ${num.trim()}`);
-        }
-        return parsed;
-      });
-      if (capabilities.length === 0) {
-        console.log('No valid capabilities selected, using tool default.');
-        capabilities = undefined; // Let tool default if empty after parse
-      }
-    } else {
-      console.log('Using tool default capabilities (TEXT_GENERATION).');
-      capabilities = undefined; // Explicitly undefined to use default
-    }
-  } catch (error) {
-    console.error(
-      `Error parsing capabilities: ${
-        error instanceof Error ? error.message : error
-      }`
-    );
-    console.log('Using tool default capabilities (TEXT_GENERATION).');
-    capabilities = undefined;
-  }
-
-  console.log(`Selected capabilities: ${capabilities ? capabilities.join(', ') : 'Default'}`);
-
-  // Handle fee configuration
-  const feeConfig = await promptForFeesConfiguration();
-
-  // PFP Handling Removed - RegisterAgentTool does not support it yet
-  // const pfpPath = await question(...);
-  // ... pfp file reading logic removed ...
-
-  // --- Use RegisterAgentTool ---
-  try {
-    console.log(
-      `\nRegistering agent "${name}" using RegisterAgentTool... this may take several minutes.`
-    );
-
-    const registerTool = new RegisterAgentTool(hcsClient);
-
-    // Prepare input based on tool schema
-    const toolInput: Record<string, any> = {
-      name,
-      description,
-      model,
-      capabilities,
-    };
-
-    if (feeConfig) {
-      toolInput.feeCollectorAccountId = feeConfig.defaultCollectorAccountId || undefined;
-      toolInput.hbarFees = feeConfig.hbarFees.length > 0 ? feeConfig.hbarFees : undefined;
-      toolInput.tokenFees = feeConfig.tokenFees.length > 0 ? feeConfig.tokenFees : undefined;
-      toolInput.exemptAccountIds = feeConfig.exemptAccountIds.length > 0 ? feeConfig.exemptAccountIds : undefined;
-    }
-
-    // Invoke the tool
-    const resultString = await registerTool.invoke(toolInput);
-
-    // Process the result string
-    try {
-      const result = JSON.parse(resultString);
-
-      if (result.success && result.accountId && result.privateKey && result.inboundTopicId && result.outboundTopicId) {
-        const newAgent: RegisteredAgent = {
-          name: result.name,
-          accountId: result.accountId,
-          inboundTopicId: result.inboundTopicId,
-          outboundTopicId: result.outboundTopicId,
-          profileTopicId: result.profileTopicId !== 'N/A' ? result.profileTopicId : undefined,
-          operatorPrivateKey: result.privateKey,
-        };
-
-        // Note: Tool already updates .env file internally
-        // await updateEnvFile(ENV_FILE_PATH, { ... });
-
-        registeredAgents.push(newAgent);
-        console.log('\nRegistration Successful!');
-        console.log(result.message || resultString);
-        displayAgentInfo(newAgent);
-
-        // Automatically select the newly registered agent if it's the first one
-        if (registeredAgents.length === 1) {
-          currentAgent = newAgent;
-          // Reconfigure client and tools for the new agent
-          hcsClient = new HCS10Client(
-            currentAgent.accountId,
-            currentAgent.operatorPrivateKey,
-            hcsClient.getNetwork(),
-            {
-              useEncryption: false,
-              registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
-            }
-          );
-          connectionTool = new ConnectionTool({ client: hcsClient, stateManager });
-          connectionMonitorTool.updateClient(hcsClient);
-          stateManager.setCurrentAgent(currentAgent);
-          console.log(
-            `\nAgent "${currentAgent.name}" automatically selected as active agent.`
-          );
-          console.log('Client and tools reconfigured.');
-        } else {
-           // Update state manager if an agent was already active
-           if (currentAgent) {
-              stateManager.setCurrentAgent(currentAgent);
-           } else {
-              // If no agent was active, select the new one
-              console.log(`\nPlease select agent ${registeredAgents.length} to make it active.`);
-           }
-        }
-      } else {
-        // Handle cases where parsing succeeded but registration wasn't fully successful
-        console.error('Registration via tool reported an issue or missing data:');
-        console.log(result.message || resultString);
-      }
-    } catch (parseError) {
-      // Handle cases where the result string wasn't valid JSON (likely an error message)
-      console.error('\nRegistration failed. Tool returned an error:');
-      console.error(resultString);
-    }
-
-  } catch (error) {
-    // Catch unexpected errors during tool instantiation or invocation
-    console.error('\nError during agent registration process:', error);
-  }
 }
 
 async function listManagedAgents() {
@@ -1202,17 +1054,29 @@ async function showMenu() {
   await showMenu();
 }
 
+let initResult: {
+  hcs10Client: HCS10Client;
+  tools: Partial<HCS10Tools>;
+  stateManager: IStateManager;
+};
+
 // --- Initialization and Start ---
 async function main() {
   console.log('Initializing HCS10 client...');
   try {
+    // Initialize state manager with TODD as the default prefix
     stateManager = new OpenConvaiState();
-    const initResult = await initializeHCS10Client({
-      useEncryption: false, // Keep encryption off for simplicity in demo
-      registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+    console.log('State manager initialized with default prefix: TODD');
+
+    initResult = await initializeHCS10Client({
       stateManager: stateManager,
     });
+
     hcsClient = initResult.hcs10Client;
+    // Ensure connectionTool exists before assignment
+    if (!initResult.tools.connectionTool) {
+      throw new Error('ConnectionTool failed to initialize.');
+    }
     connectionTool = initResult.tools.connectionTool;
 
     // Initialize our ConnectionMonitorTool with the client
@@ -1223,61 +1087,69 @@ async function main() {
 
     console.log('Client initialized successfully.');
 
-    const toddAccountId = process.env.TODD_ACCOUNT_ID;
-    const toddPrivateKey = process.env.TODD_PRIVATE_KEY;
-    const toddInboundTopicId = process.env.TODD_INBOUND_TOPIC_ID;
-    const toddOutboundTopicId = process.env.TODD_OUTBOUND_TOPIC_ID;
-    const toddProfileTopicId = process.env.TODD_PROFILE_TOPIC_ID; // Optional
+    // Load all known agents from environment variables
+    const knownPrefixes = (process.env.KNOWN_AGENT_PREFIXES || 'TODD')
+      .split(',')
+      .map((prefix) => prefix.trim())
+      .filter((prefix) => prefix.length > 0);
 
-    if (
-      toddAccountId &&
-      toddPrivateKey &&
-      toddInboundTopicId &&
-      toddOutboundTopicId
-    ) {
-      console.log(
-        'Found Todd agent details in environment variables. Setting as active agent...'
-      );
-      const toddAgent: RegisteredAgent = {
-        name: 'Todd (from env)',
-        accountId: toddAccountId,
-        inboundTopicId: toddInboundTopicId,
-        outboundTopicId: toddOutboundTopicId,
-        profileTopicId: toddProfileTopicId,
-        operatorPrivateKey: toddPrivateKey,
-      };
+    console.log(
+      `Found ${knownPrefixes.length} known agent prefixes: ${knownPrefixes.join(
+        ', '
+      )}`
+    );
 
-      registeredAgents.push(toddAgent);
-      currentAgent = toddAgent;
+    for (const prefix of knownPrefixes) {
+      const agent = await loadAgentFromEnv(prefix);
+      if (agent) {
+        registeredAgents.push(agent);
+        console.log(`Loaded agent: ${agent.name} (${agent.accountId})`);
+      }
+    }
 
-      hcsClient = new HCS10Client(
-        currentAgent.accountId,
-        currentAgent.operatorPrivateKey,
-        hcsClient.getNetwork(),
-        {
-          useEncryption: false,
-          registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
-        }
-      );
-      console.log(`Client reconfigured for active agent: ${currentAgent.name}`);
+    // Prompt the user to select an agent to use
+    if (registeredAgents.length > 0) {
+      console.log('\nSelect an agent to use:');
+      currentAgent = await promptSelectAgent();
 
-      // Recreate the connection tool with the agent's client
-      connectionTool = new ConnectionTool({
-        client: hcsClient,
-        stateManager: stateManager,
-      });
+      if (currentAgent) {
+        console.log(
+          `Selected agent: ${currentAgent.name} (${currentAgent.accountId})`
+        );
 
-      // Update our ConnectionMonitorTool with the new client
-      connectionMonitorTool.updateClient(hcsClient);
+        // Reconfigure client for the selected agent
+        hcsClient = new HCS10Client(
+          currentAgent.accountId,
+          currentAgent.operatorPrivateKey,
+          hcsClient.getNetwork(),
+          {
+            useEncryption: false,
+            registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+          }
+        );
 
-      console.log('Connection tools reconfigured for active agent');
+        // Update the state manager and tools with the selected agent
+        stateManager.setCurrentAgent(currentAgent);
 
-      // Update the state manager with the current agent
-      stateManager.setCurrentAgent(currentAgent);
+        // Recreate connection tools with the new client
+        connectionTool = new ConnectionTool({
+          client: hcsClient,
+          stateManager: stateManager,
+        });
+
+        connectionMonitorTool = new ConnectionMonitorTool({
+          hcsClient: hcsClient,
+          stateManager: stateManager,
+        });
+
+        console.log('Client and tools reconfigured for the selected agent.');
+      } else {
+        console.log(
+          'No agent selected. Please register or select an agent before using connection features.'
+        );
+      }
     } else {
-      console.log(
-        'Todd agent details not found in environment variables. Register or select an agent manually.'
-      );
+      console.log('No agents found. Please register a new agent.');
     }
 
     await showMenu();
@@ -1543,6 +1415,330 @@ async function acceptConnectionRequest() {
     }
   } catch (error) {
     console.error('\nError accepting connection request:', error);
+  }
+}
+
+// Helper function to load an agent from environment variables with a specified prefix
+async function loadAgentFromEnv(
+  prefix: string
+): Promise<RegisteredAgent | null> {
+  const accountId = process.env[`${prefix}_ACCOUNT_ID`];
+  const privateKey = process.env[`${prefix}_PRIVATE_KEY`];
+  const inboundTopicId = process.env[`${prefix}_INBOUND_TOPIC_ID`];
+  const outboundTopicId = process.env[`${prefix}_OUTBOUND_TOPIC_ID`];
+  const profileTopicId = process.env[`${prefix}_PROFILE_TOPIC_ID`]; // Optional
+
+  if (!accountId || !privateKey || !inboundTopicId || !outboundTopicId) {
+    console.log(`Incomplete agent details for prefix ${prefix}, skipping.`);
+    return null;
+  }
+
+  return {
+    name: `${prefix} Agent`,
+    accountId,
+    inboundTopicId,
+    outboundTopicId,
+    profileTopicId,
+    operatorPrivateKey: privateKey,
+  };
+}
+
+// Function to prompt the user to select an agent from the loaded agents
+async function promptSelectAgent(): Promise<RegisteredAgent | null> {
+  if (registeredAgents.length === 0) {
+    console.log('No agents available. Please register a new agent.');
+    return null;
+  }
+
+  if (registeredAgents.length === 1) {
+    console.log(
+      `Auto-selecting the only available agent: ${registeredAgents[0].name}`
+    );
+    return registeredAgents[0];
+  }
+
+  await listManagedAgents();
+
+  const choice = await question(
+    'Enter the number of the agent to use (or press Enter to skip): '
+  );
+
+  if (!choice.trim()) {
+    console.log(
+      'No agent selected. You can register a new one or select one later.'
+    );
+    return null;
+  }
+
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= registeredAgents.length) {
+    console.log('Invalid choice. No agent selected.');
+    return null;
+  }
+
+  return registeredAgents[index];
+}
+
+// Helper function to update KNOWN_AGENT_PREFIXES in the .env file
+async function addPrefixToKnownAgents(prefix: string): Promise<void> {
+  const envFilePath = '.env';
+  const currentPrefixes = process.env.KNOWN_AGENT_PREFIXES || '';
+
+  // Split by comma, filter empty entries, add new prefix if not already there
+  const prefixList = currentPrefixes
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  if (!prefixList.includes(prefix)) {
+    prefixList.push(prefix);
+
+    // Update the env file with the new list
+    await updateEnvFile(envFilePath, {
+      KNOWN_AGENT_PREFIXES: prefixList.join(','),
+    });
+
+    console.log(`Added ${prefix} to known agent prefixes.`);
+  }
+}
+
+// Modified registerNewAgent function (changes at the end)
+async function registerNewAgent() {
+  displayHeader('Register New Agent');
+  const name = await question('Enter agent name: ');
+  const description = await question('Enter agent description (optional): ');
+  const model = await question(
+    'Enter agent model identifier (optional, e.g., gpt-4o): '
+  );
+
+  if (!name) {
+    console.error('Agent name is required.');
+    return;
+  }
+
+  // Display capabilities and let user select
+  displayCapabilities();
+  console.log(
+    '\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): '
+  );
+  const capabilitiesInput = await question('> ');
+  let capabilities: number[] | undefined = undefined;
+  try {
+    if (capabilitiesInput.trim()) {
+      capabilities = capabilitiesInput.split(',').map((num) => {
+        const parsed = parseInt(num.trim(), 10);
+        if (isNaN(parsed) || parsed < 0 || parsed > 18) {
+          throw new Error(`Invalid capability number: ${num.trim()}`);
+        }
+        return parsed;
+      });
+      if (capabilities.length === 0) {
+        console.log('No valid capabilities selected, using tool default.');
+        capabilities = undefined; // Let tool default if empty after parse
+      }
+    } else {
+      console.log('Using tool default capabilities (TEXT_GENERATION).');
+      capabilities = undefined; // Explicitly undefined to use default
+    }
+  } catch (error) {
+    console.error(
+      `Error parsing capabilities: ${
+        error instanceof Error ? error.message : error
+      }`
+    );
+    console.log('Using tool default capabilities (TEXT_GENERATION).');
+    capabilities = undefined;
+  }
+
+  console.log(
+    `Selected capabilities: ${
+      capabilities ? capabilities.join(', ') : 'Default'
+    }`
+  );
+
+  // --- ADDED PROFILE PICTURE PROMPT ---
+  const profilePictureInput = await question(
+    'Enter profile picture path or URL (optional, e.g., todd.svg or https://example.com/pfp.png): '
+  );
+  // --- END ADDED PROFILE PICTURE PROMPT ---
+
+  // Handle fee configuration
+  const feeConfig = await promptForFeesConfiguration();
+
+  // Environment variable persistence configuration - Simplified Prompt
+  console.log('\nConfigure environment variable persistence:');
+  const prefixInput = await question(
+    'Enter prefix for environment variables (e.g., DAVE, AGENT - leave blank for default TODD): '
+  ); // No trailing space here
+
+  let persistence: { prefix?: string } | undefined = undefined;
+  const customPrefix = prefixInput.trim();
+
+  if (customPrefix) {
+    persistence = { prefix: customPrefix };
+    console.log(`Environment variables will use the prefix: ${customPrefix}`);
+  } else {
+    console.log('Using default prefix: TODD');
+    // No need to set persistence object, tool/stateManager uses default
+  }
+
+  // Modified section to fix linter error and update known prefixes
+  // Note: Not keeping originalHCSClient since we don't restore it
+  hcsClient = initResult.hcs10Client;
+
+  // --- Use RegisterAgentTool ---
+  try {
+    console.log(
+      `\nRegistering agent "${name}" using RegisterAgentTool... this may take several minutes.`
+    );
+
+    const registerTool = new RegisterAgentTool(hcsClient, stateManager);
+
+    // Resolve local profile picture path
+    let resolvedPfpInput: string | undefined = undefined;
+    if (profilePictureInput) {
+      const isUrl =
+        profilePictureInput.startsWith('http://') ||
+        profilePictureInput.startsWith('https://');
+      if (isUrl) {
+        resolvedPfpInput = profilePictureInput;
+      } else {
+        // Assume local path, resolve relative to project root
+        resolvedPfpInput = path.join(projectRoot, profilePictureInput);
+        console.log(`Resolved local profile picture path: ${resolvedPfpInput}`);
+      }
+    }
+
+    // Prepare input based on tool schema
+    const toolInput: Record<string, unknown> = {
+      name,
+      description,
+      model,
+      capabilities,
+      profilePicture: resolvedPfpInput,
+    };
+
+    if (feeConfig) {
+      toolInput.feeCollectorAccountId =
+        feeConfig.defaultCollectorAccountId || undefined;
+      toolInput.hbarFees =
+        feeConfig.hbarFees.length > 0 ? feeConfig.hbarFees : undefined;
+      toolInput.tokenFees =
+        feeConfig.tokenFees.length > 0 ? feeConfig.tokenFees : undefined;
+      toolInput.exemptAccountIds =
+        feeConfig.exemptAccountIds.length > 0
+          ? feeConfig.exemptAccountIds
+          : undefined;
+    }
+
+    if (persistence && persistence.prefix) {
+      toolInput.persistence = persistence;
+    }
+
+    // Invoke the tool
+    const resultString = await registerTool.invoke(toolInput);
+
+    // Process the result string
+    try {
+      const result = JSON.parse(resultString);
+
+      if (
+        result.success &&
+        result.accountId &&
+        result.privateKey &&
+        result.inboundTopicId &&
+        result.outboundTopicId
+      ) {
+        const newAgent: RegisteredAgent = {
+          name: result.name,
+          accountId: result.accountId,
+          inboundTopicId: result.inboundTopicId,
+          outboundTopicId: result.outboundTopicId,
+          profileTopicId:
+            result.profileTopicId !== 'N/A' ? result.profileTopicId : undefined,
+          operatorPrivateKey: result.privateKey,
+        };
+
+        registeredAgents.push(newAgent);
+        console.log('\nRegistration Successful!');
+        console.log(result.message || resultString);
+        displayAgentInfo(newAgent);
+
+        // If user specified a custom prefix, add it to KNOWN_AGENT_PREFIXES in .env
+        if (persistence && persistence.prefix) {
+          await addPrefixToKnownAgents(persistence.prefix);
+        } else {
+          // Add the default prefix if not already in the list
+          await addPrefixToKnownAgents('TODD');
+        }
+
+        // Automatically select the newly registered agent if it's the first one
+        if (registeredAgents.length === 1) {
+          currentAgent = newAgent;
+          // Reconfigure client and tools for the new agent
+          hcsClient = new HCS10Client(
+            currentAgent.accountId,
+            currentAgent.operatorPrivateKey,
+            hcsClient.getNetwork(),
+            {
+              useEncryption: false,
+              registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+            }
+          );
+          connectionTool = new ConnectionTool({
+            client: hcsClient,
+            stateManager,
+          });
+          connectionMonitorTool.updateClient(hcsClient);
+          stateManager.setCurrentAgent(currentAgent);
+          console.log(
+            `\nAgent "${currentAgent.name}" automatically selected as active agent.`
+          );
+          console.log('Client and tools reconfigured.');
+        } else {
+          // Ask if they want to switch to the new agent
+          const switchToNew = await question(
+            'Would you like to switch to this new agent? (y/n): '
+          );
+          if (switchToNew.toLowerCase().startsWith('y')) {
+            currentAgent = newAgent;
+            // Reconfigure client and tools for the new agent
+            hcsClient = new HCS10Client(
+              currentAgent.accountId,
+              currentAgent.operatorPrivateKey,
+              hcsClient.getNetwork(),
+              {
+                useEncryption: false,
+                registryUrl:
+                  process.env.REGISTRY_URL || 'https://moonscape.tech',
+              }
+            );
+            connectionTool = new ConnectionTool({
+              client: hcsClient,
+              stateManager,
+            });
+            connectionMonitorTool.updateClient(hcsClient);
+            stateManager.setCurrentAgent(currentAgent);
+            console.log(`\nSwitched to agent "${currentAgent.name}".`);
+          } else {
+            console.log('Keeping current agent selection.');
+          }
+        }
+      } else {
+        // Handle cases where parsing succeeded but registration wasn't fully successful
+        console.error(
+          'Registration via tool reported an issue or missing data:'
+        );
+        console.log(result.message || resultString);
+      }
+    } catch (parseError) {
+      // Handle cases where the result string wasn't valid JSON (likely an error message)
+      console.error('\nRegistration failed. Tool returned an error:');
+      console.error(resultString);
+    }
+  } catch (error) {
+    // Catch unexpected errors during tool instantiation or invocation
+    console.error('\nError during agent registration process:', error);
   }
 }
 

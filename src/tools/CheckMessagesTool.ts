@@ -1,7 +1,7 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { IStateManager } from '../state/open-convai-state';
+import { IStateManager } from '../state/state-types';
 import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
 export interface CheckMessagesToolParams extends ToolParams {

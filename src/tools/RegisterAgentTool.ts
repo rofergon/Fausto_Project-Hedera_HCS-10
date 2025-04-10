@@ -3,15 +3,15 @@ import {
   Logger,
   FeeConfigBuilder,
 } from '@hashgraphonline/standards-sdk';
-import {
-  ensureAgentHasEnoughHbar,
-  ENV_FILE_PATH,
-  updateEnvFile,
-} from '../../examples/utils';
-import { HCS10Client } from '../hcs10/HCS10Client';
-import { AgentMetadata } from '../hcs10/types';
+import { ensureAgentHasEnoughHbar } from '../../examples/utils';
+import { HCS10Client, ExtendedAgentMetadata } from '../hcs10/HCS10Client';
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { IStateManager } from '../state/state-types';
+import { AgentPersistenceOptions } from '../state/state-types';
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
 
 /**
  * Interface for HCS10 registration result
@@ -44,7 +44,25 @@ interface AgentRegistrationDetails {
   hasFees: boolean;
   hbarFee: number;
   tokenFee: { amount: number; tokenId: string } | null;
+  profilePicture?: {
+    source: string;
+    topicId?: string;
+  };
 }
+
+/**
+ * Profile picture input types supported by the tool
+ */
+type ProfilePictureInput =
+  | string
+  | {
+      url: string;
+      filename: string;
+    }
+  | {
+      path: string;
+      filename?: string;
+    };
 
 /**
  * RegisterAgentTool wraps the createAndRegisterAgent() function of HCS10Client.
@@ -56,6 +74,7 @@ export class RegisterAgentTool extends StructuredTool {
   description =
     "Creates and registers the AI agent on the Hedera network. Returns JSON string with agent details (accountId, privateKey, topics) on success. Optionally supports fee configuration for the agent's inbound topic using HBAR or specific tokens.";
   private client: HCS10Client;
+  private stateManager?: IStateManager;
 
   schema = z.object({
     name: z.string().describe('The name of the agent to register'),
@@ -76,6 +95,22 @@ export class RegisterAgentTool extends StructuredTool {
       .optional()
       .describe(
         'Optional array of AIAgentCapability enum values (0-18). If not provided, defaults to just TEXT_GENERATION (0)'
+      ),
+    profilePicture: z
+      .union([
+        z.string().describe('Path to a local image file or URL to an image'),
+        z.object({
+          url: z.string().describe('URL to an image file'),
+          filename: z.string().describe('Filename to use for the image'),
+        }),
+        z.object({
+          path: z.string().describe('Path to a local image file'),
+          filename: z.string().optional().describe('Optional custom filename'),
+        }),
+      ])
+      .optional()
+      .describe(
+        'Optional profile picture for the agent (local file path or URL)'
       ),
     feeCollectorAccountId: z
       .string()
@@ -127,15 +162,112 @@ export class RegisterAgentTool extends StructuredTool {
       .describe(
         'Optional: Array of account IDs to exempt from ALL fees set for this agent.'
       ),
+    setAsCurrent: z
+      .boolean()
+      .optional()
+      .describe(
+        'Optional: Whether to set the newly registered agent as the current active agent in the state manager. Default: true'
+      ),
+    persistence: z
+      .object({
+        prefix: z.string().optional(),
+      })
+      .optional()
+      .describe(
+        'Optional: Configuration for persisting agent data to environment variables. The prefix will determine the environment variable names (e.g., PREFIX_ACCOUNT_ID). Defaults to TODD if not specified.'
+      ),
   });
 
   /**
    * Creates a new RegisterAgentTool instance
    * @param client - Instance of HCS10Client (already configured with operator/network)
+   * @param stateManager - Optional state manager to store agent details
    */
-  constructor(client: HCS10Client) {
+  constructor(client: HCS10Client, stateManager?: IStateManager) {
     super();
     this.client = client;
+    this.stateManager = stateManager;
+  }
+
+  /**
+   * Loads a profile picture from a local file or URL and returns a buffer
+   * @param profilePicture - Local file path or URL
+   * @returns Object containing buffer and filename
+   */
+  private async loadProfilePicture(
+    profilePicture: ProfilePictureInput
+  ): Promise<{ buffer: Buffer; filename: string } | null> {
+    const logger = Logger.getInstance({
+      level: 'debug',
+    });
+
+    try {
+      if (!profilePicture) {
+        return null;
+      }
+
+      if (typeof profilePicture === 'string') {
+        const isUrl =
+          profilePicture.startsWith('http://') ||
+          profilePicture.startsWith('https://');
+
+        if (isUrl) {
+          logger.info(`Loading profile picture from URL: ${profilePicture}`);
+          const response = await axios.get(profilePicture, {
+            responseType: 'arraybuffer',
+          });
+          const buffer = Buffer.from(response.data);
+
+          const urlPathname = new URL(profilePicture).pathname;
+          const filename = path.basename(urlPathname) || 'profile.png';
+
+          return { buffer, filename };
+        } else {
+          if (!fs.existsSync(profilePicture)) {
+            logger.warn(`Profile picture file not found: ${profilePicture}`);
+            return null;
+          }
+
+          logger.info(`Loading profile picture from file: ${profilePicture}`);
+          const buffer = fs.readFileSync(profilePicture);
+          const filename = path.basename(profilePicture);
+
+          return { buffer, filename };
+        }
+      }
+
+      if ('url' in profilePicture) {
+        logger.info(`Loading profile picture from URL: ${profilePicture.url}`);
+        const response = await axios.get(profilePicture.url, {
+          responseType: 'arraybuffer',
+        });
+        const buffer = Buffer.from(response.data);
+        const filename = profilePicture.filename || 'profile.png';
+
+        return { buffer, filename };
+      }
+
+      if ('path' in profilePicture) {
+        if (!fs.existsSync(profilePicture.path)) {
+          logger.warn(`Profile picture file not found: ${profilePicture.path}`);
+          return null;
+        }
+
+        logger.info(
+          `Loading profile picture from file: ${profilePicture.path}`
+        );
+        const buffer = fs.readFileSync(profilePicture.path);
+        const filename =
+          profilePicture.filename || path.basename(profilePicture.path);
+
+        return { buffer, filename };
+      }
+
+      return null;
+    } catch (error) {
+      logger.error('Failed to load profile picture:', error);
+      return null;
+    }
   }
 
   /**
@@ -147,7 +279,7 @@ export class RegisterAgentTool extends StructuredTool {
       level: 'debug',
     });
 
-    const metadata: AgentMetadata = {
+    const metadata: ExtendedAgentMetadata = {
       name: input.name,
       description: input.description,
       type: input.type,
@@ -155,6 +287,26 @@ export class RegisterAgentTool extends StructuredTool {
       capabilities: input.capabilities || [AIAgentCapability.TEXT_GENERATION],
       properties: {},
     };
+
+    let profilePictureSource = '';
+    if (input.profilePicture) {
+      const profilePictureData = await this.loadProfilePicture(
+        input.profilePicture
+      );
+      if (profilePictureData) {
+        const { buffer, filename } = profilePictureData;
+        metadata.pfpBuffer = buffer;
+        metadata.pfpFileName = filename;
+
+        if (typeof input.profilePicture === 'string') {
+          profilePictureSource = input.profilePicture;
+        } else if ('url' in input.profilePicture) {
+          profilePictureSource = input.profilePicture.url;
+        } else if ('path' in input.profilePicture) {
+          profilePictureSource = input.profilePicture.path;
+        }
+      }
+    }
 
     const hasHbarFee = input.hbarFee !== undefined && input.hbarFee > 0;
     const hasTokenFee = this.hasValidTokenFee(input.tokenFee);
@@ -170,7 +322,7 @@ export class RegisterAgentTool extends StructuredTool {
         return 'Error: Fee collector account ID is required when specifying fees and could not be determined.';
       }
 
-      let feeConfigBuilder = new FeeConfigBuilder({
+      const feeConfigBuilder = new FeeConfigBuilder({
         network: this.client.getNetwork(),
         logger,
       });
@@ -181,11 +333,13 @@ export class RegisterAgentTool extends StructuredTool {
             (id) => id !== collectorId && id.startsWith('0.0')
           ) || [];
 
+        let updatedFeeConfig = feeConfigBuilder;
+
         if (hasHbarFee) {
           logger.info(
             `Adding HBAR fee: ${input.hbarFee} HBAR to be collected by ${collectorId}`
           );
-          feeConfigBuilder = feeConfigBuilder.addHbarFee(
+          updatedFeeConfig = updatedFeeConfig.addHbarFee(
             input.hbarFee!,
             collectorId,
             exemptAccountIds
@@ -198,7 +352,7 @@ export class RegisterAgentTool extends StructuredTool {
             logger.info(
               `Adding HBAR fee: ${fee.amount} HBAR to be collected by ${feeCollector}`
             );
-            feeConfigBuilder = feeConfigBuilder.addHbarFee(
+            updatedFeeConfig = updatedFeeConfig.addHbarFee(
               fee.amount,
               feeCollector,
               exemptAccountIds
@@ -212,7 +366,7 @@ export class RegisterAgentTool extends StructuredTool {
               input.tokenFee!.tokenId
             } to be collected by ${collectorId}`
           );
-          feeConfigBuilder = await feeConfigBuilder.addTokenFee(
+          updatedFeeConfig = await updatedFeeConfig.addTokenFee(
             input.tokenFee!.amount,
             input.tokenFee!.tokenId,
             collectorId,
@@ -227,7 +381,7 @@ export class RegisterAgentTool extends StructuredTool {
             logger.info(
               `Adding token fee: ${fee.amount} of token ${fee.tokenId} to be collected by ${feeCollector}`
             );
-            feeConfigBuilder = await feeConfigBuilder.addTokenFee(
+            updatedFeeConfig = await updatedFeeConfig.addTokenFee(
               fee.amount,
               fee.tokenId,
               feeCollector,
@@ -237,7 +391,8 @@ export class RegisterAgentTool extends StructuredTool {
           }
         }
 
-        metadata.feeConfig = feeConfigBuilder;
+        metadata.feeConfig = updatedFeeConfig;
+        logger.info('FeeConfigBuilder created successfully');
       } catch (error) {
         return `Error: Failed to configure fees. Reason: ${
           error instanceof Error ? error.message : String(error)
@@ -246,10 +401,17 @@ export class RegisterAgentTool extends StructuredTool {
     }
 
     try {
+      logger.info('Registering agent with metadata');
+
       const result = (await this.client.createAndRegisterAgent(
         metadata
       )) as unknown as HCS10RegistrationResult;
-      return this.processRegistrationResult(result, input);
+
+      return this.processRegistrationResult(
+        result,
+        input,
+        profilePictureSource
+      );
     } catch (error) {
       return `Error: Failed to create/register agent "${input.name}". Reason: ${
         error instanceof Error ? error.message : String(error)
@@ -277,23 +439,15 @@ export class RegisterAgentTool extends StructuredTool {
    */
   private async processRegistrationResult(
     result: HCS10RegistrationResult,
-    input: z.infer<typeof this.schema>
+    input: z.infer<typeof this.schema>,
+    profilePictureSource: string = ''
   ): Promise<string> {
     const newAgentAccountId = result?.metadata?.accountId || '';
     const inboundTopicId = result?.metadata?.inboundTopicId || '';
     const outboundTopicId = result?.metadata?.outboundTopicId || '';
     const profileTopicId = result?.metadata?.profileTopicId || '';
     const privateKey = result?.metadata?.privateKey || '';
-
-    if (privateKey && newAgentAccountId && inboundTopicId && outboundTopicId) {
-      await this.updateEnvironmentFile(
-        newAgentAccountId,
-        privateKey,
-        inboundTopicId,
-        outboundTopicId
-      );
-      await this.ensureAgentHasFunds(newAgentAccountId, input.name);
-    }
+    const pfpTopicId = result?.metadata?.pfpTopicId;
 
     this.validateRegistrationResult(
       newAgentAccountId,
@@ -301,6 +455,42 @@ export class RegisterAgentTool extends StructuredTool {
       outboundTopicId,
       privateKey
     );
+
+    if (
+      this.stateManager &&
+      privateKey &&
+      newAgentAccountId &&
+      inboundTopicId &&
+      outboundTopicId &&
+      (input.setAsCurrent === undefined || input.setAsCurrent)
+    ) {
+      const agent = {
+        name: input.name,
+        accountId: newAgentAccountId,
+        inboundTopicId,
+        outboundTopicId,
+        profileTopicId,
+        privateKey,
+        pfpTopicId: pfpTopicId as string,
+      };
+
+      this.stateManager.setCurrentAgent(agent);
+
+      if (this.stateManager.persistAgentData && input.persistence) {
+        try {
+          const persistenceOptions: AgentPersistenceOptions = {
+            type: 'env-file',
+            prefix: input.persistence.prefix,
+          };
+
+          await this.stateManager.persistAgentData(agent, persistenceOptions);
+        } catch (error) {
+          Logger.getInstance().warn('Failed to persist agent data', error);
+        }
+      }
+    }
+
+    await this.ensureAgentHasFunds(newAgentAccountId, input.name);
 
     const feeDescription = this.createFeeDescription(input);
     const feeMessage = feeDescription
@@ -322,24 +512,14 @@ export class RegisterAgentTool extends StructuredTool {
       tokenFee: input.tokenFee || null,
     };
 
-    return JSON.stringify(registrationDetails);
-  }
+    if (pfpTopicId || profilePictureSource) {
+      registrationDetails.profilePicture = {
+        source: profilePictureSource,
+        topicId: pfpTopicId as string,
+      };
+    }
 
-  /**
-   * Updates the environment file with the new agent details
-   */
-  private async updateEnvironmentFile(
-    accountId: string,
-    privateKey: string,
-    inboundTopicId: string,
-    outboundTopicId: string
-  ): Promise<void> {
-    await updateEnvFile(ENV_FILE_PATH, {
-      TODD_ACCOUNT_ID: accountId,
-      TODD_PRIVATE_KEY: privateKey,
-      TODD_INBOUND_TOPIC_ID: inboundTopicId,
-      TODD_OUTBOUND_TOPIC_ID: outboundTopicId,
-    });
+    return JSON.stringify(registrationDetails);
   }
 
   /**

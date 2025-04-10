@@ -1,7 +1,7 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { IStateManager } from '../state/open-convai-state';
+import { IStateManager } from '../state/state-types';
 import { Logger, HCSMessage } from '@hashgraphonline/standards-sdk';
 
 export interface ManageConnectionRequestsToolParams extends ToolParams {
@@ -93,7 +93,7 @@ export class ManageConnectionRequestsTool extends StructuredTool {
     }
   }
 
-  private async refreshRequests(): Promise<void> {
+  public async refreshRequests(): Promise<void> {
     try {
       const inboundTopicId = await this.hcsClient.getInboundTopicId();
       const outboundTopicId = await this.hcsClient.getOutboundTopicId();

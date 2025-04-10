@@ -4,7 +4,7 @@ import {
   IStateManager,
   ConnectionRequestInfo,
   AgentProfileInfo,
-} from '../state/open-convai-state';
+} from '../state/state-types';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import {
   Logger,

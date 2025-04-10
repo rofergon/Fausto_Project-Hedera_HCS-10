@@ -1,8 +1,9 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { IStateManager, ActiveConnection } from '../state/open-convai-state';
+import { IStateManager, ActiveConnection } from '../state/state-types';
 import { Logger, FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
+import { ManageConnectionRequestsTool } from './ManageConnectionRequestsTool';
 
 export interface AcceptConnectionRequestToolParams extends ToolParams {
   hcsClient: HCS10Client;
@@ -62,6 +63,13 @@ export class AcceptConnectionRequestTool extends StructuredTool {
     if (!currentAgent) {
       return 'Error: Cannot accept connection request. No agent is currently active. Please register or select an agent first.';
     }
+
+    const manageConnectionRequestsTool = new ManageConnectionRequestsTool({
+      hcsClient: this.hcsClient,
+      stateManager: this.stateManager,
+    });
+
+    await manageConnectionRequestsTool.refreshRequests();
 
     const request = this.stateManager.getConnectionRequestById(requestId);
     if (!request) {

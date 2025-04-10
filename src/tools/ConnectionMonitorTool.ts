@@ -5,7 +5,7 @@ import {
   IStateManager,
   ActiveConnection,
   AgentProfileInfo,
-} from '../state/open-convai-state';
+} from '../state/state-types';
 import {
   Logger,
   FeeConfigBuilder,
@@ -180,7 +180,7 @@ export class ConnectionMonitorTool extends StructuredTool {
 
       while (Date.now() < endTime) {
         try {
-          await this.listConnectionsTool.call({
+          await this.listConnectionsTool.invoke({
             includeDetails: false,
             showPending: false,
           });
