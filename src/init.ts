@@ -46,7 +46,7 @@ export async function initializeHCS10Client(
 
   if (!operatorId || !operatorPrivateKey) {
     throw new Error(
-      'HEDERA_ACCOUNT_ID and HEDERA_PRIVATE_KEY must be set in environment variables.'
+      'HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY must be set in environment variables.'
     );
   }
 
