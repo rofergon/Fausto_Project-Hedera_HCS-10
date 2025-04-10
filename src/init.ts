@@ -2,7 +2,8 @@ import { HCS10Client, StandardNetworkType } from './hcs10/HCS10Client';
 import { RegisterAgentTool } from './tools/RegisterAgentTool';
 import { SendMessageTool } from './tools/SendMessageTool';
 import { ConnectionTool } from './tools/ConnectionTool';
-import { IStateManager, OpenConvaiState } from './state/open-convai-state';
+import { IStateManager } from './state/state-types';
+import { OpenConvaiState } from './state/open-convai-state';
 import { FindRegistrationsTool } from './tools/FindRegistrationsTool';
 import { InitiateConnectionTool } from './tools/InitiateConnectionTool';
 import { ListConnectionsTool } from './tools/ListConnectionsTool';
@@ -70,7 +71,8 @@ export async function initializeHCS10Client(
 
   // Use environment variables as fallbacks if not explicitly provided
   const operatorId = config.operatorId || process.env.HEDERA_OPERATOR_ID;
-  const operatorPrivateKey = config.operatorKey || process.env.HEDERA_OPERATOR_KEY;
+  const operatorPrivateKey =
+    config.operatorKey || process.env.HEDERA_OPERATOR_KEY;
 
   // Get network from config or env, default to testnet
   const networkEnv = config.network || process.env.HEDERA_NETWORK || 'testnet';
@@ -100,22 +102,19 @@ export async function initializeHCS10Client(
   });
 
   // Create or use provided state manager
-  const stateManager = options?.stateManager || new OpenConvaiState({
-    defaultEnvFilePath: ENV_FILE_PATH,
-    defaultPrefix: 'TODD' // Keep backward compatibility with existing demos
-  });
+  const stateManager =
+    options?.stateManager ||
+    new OpenConvaiState({
+      defaultEnvFilePath: ENV_FILE_PATH,
+      defaultPrefix: 'TODD', // Keep backward compatibility with existing demos
+    });
   logger.info('State manager initialized');
 
   // Instantiate primary HCS10Client
-  const hcs10Client = new HCS10Client(
-    operatorId,
-    operatorPrivateKey,
-    network,
-    {
-      useEncryption: config.useEncryption,
-      registryUrl: config.registryUrl,
-    }
-  );
+  const hcs10Client = new HCS10Client(operatorId, operatorPrivateKey, network, {
+    useEncryption: config.useEncryption,
+    registryUrl: config.registryUrl,
+  });
   logger.info(`HCS10Client initialized for ${operatorId} on ${network}`);
 
   // Create monitoring client if requested
@@ -138,10 +137,7 @@ export async function initializeHCS10Client(
   const tools: Partial<HCS10Tools> = {};
 
   // Always create these core tools
-  tools.registerAgentTool = new RegisterAgentTool(
-    hcs10Client,
-    stateManager
-  );
+  tools.registerAgentTool = new RegisterAgentTool(hcs10Client, stateManager);
   tools.sendMessageTool = new SendMessageTool(hcs10Client);
   tools.connectionTool = new ConnectionTool({
     client: monitoringClient || hcs10Client,
@@ -150,40 +146,43 @@ export async function initializeHCS10Client(
 
   // Create all tools if requested
   if (options?.createAllTools) {
-    tools.findRegistrationsTool = new FindRegistrationsTool({hcsClient: hcs10Client});
+    tools.findRegistrationsTool = new FindRegistrationsTool({
+      hcsClient: hcs10Client,
+    });
     tools.retrieveProfileTool = new RetrieveProfileTool(hcs10Client);
     tools.initiateConnectionTool = new InitiateConnectionTool({
       hcsClient: hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.listConnectionsTool = new ListConnectionsTool({
       hcsClient: hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.sendMessageToConnectionTool = new SendMessageToConnectionTool({
       hcsClient: hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.checkMessagesTool = new CheckMessagesTool({
       hcsClient: hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.connectionMonitorTool = new ConnectionMonitorTool({
       hcsClient: monitoringClient || hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.manageConnectionRequestsTool = new ManageConnectionRequestsTool({
       hcsClient: hcs10Client,
-      stateManager
+      stateManager,
     });
     tools.acceptConnectionRequestTool = new AcceptConnectionRequestTool({
       hcsClient: hcs10Client,
-      stateManager
-    });
-    tools.listUnapprovedConnectionRequestsTool = new ListUnapprovedConnectionRequestsTool({
       stateManager,
-      hcsClient: hcs10Client
     });
+    tools.listUnapprovedConnectionRequestsTool =
+      new ListUnapprovedConnectionRequestsTool({
+        stateManager,
+        hcsClient: hcs10Client,
+      });
 
     logger.info('All tools initialized');
   }

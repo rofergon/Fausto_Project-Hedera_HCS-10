@@ -5,7 +5,7 @@ import {
   IStateManager,
   ActiveConnection,
   AgentProfileInfo,
-} from '../state/open-convai-state';
+} from '../state/state-types';
 import {
   Logger,
   FeeConfigBuilder,

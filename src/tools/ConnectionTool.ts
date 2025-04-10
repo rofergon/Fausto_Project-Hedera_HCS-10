@@ -7,7 +7,7 @@ import { Logger } from '@hashgraphonline/standards-sdk';
 import {
   IStateManager,
   ActiveConnection,
-} from '../state/open-convai-state'; // Corrected import path/name
+} from '../state/state-types'; // Corrected import path/name
 
 export interface ConnectionToolParams extends ToolParams {
   client: HCS10Client;

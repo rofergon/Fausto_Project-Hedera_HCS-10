@@ -1,7 +1,7 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { IStateManager, ActiveConnection } from '../state/open-convai-state';
+import { IStateManager, ActiveConnection } from '../state/state-types';
 import { Logger, FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
 import { ManageConnectionRequestsTool } from './ManageConnectionRequestsTool';
 
