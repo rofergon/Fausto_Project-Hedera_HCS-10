@@ -106,7 +106,10 @@ export class ConnectionMonitorTool extends StructuredTool {
     super(rest);
     this.hcsClient = hcsClient;
     this.stateManager = stateManager;
-    this.logger = Logger.getInstance({ module: 'ConnectionMonitorTool' });
+    this.logger = Logger.getInstance({
+      module: 'ConnectionMonitorTool',
+      level: 'error',
+    });
     this.listConnectionsTool = new ListConnectionsTool({
       stateManager,
       hcsClient,

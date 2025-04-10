@@ -20,18 +20,22 @@ export class ManageConnectionRequestsTool extends StructuredTool {
   schema = z.object({
     action: z
       .enum(['list', 'view', 'reject'])
-      .describe('The action to perform: list all requests, view details of a specific request, or reject a request'),
+      .describe(
+        'The action to perform: list all requests, view details of a specific request, or reject a request'
+      ),
     requestId: z
       .number()
       .optional()
-      .describe('The ID of the specific request to view or reject (required for view and reject actions)'),
+      .describe(
+        'The ID of the specific request to view or reject (required for view and reject actions)'
+      ),
   });
 
   private hcsClient: HCS10Client;
   private stateManager: IStateManager;
   private logger: Logger;
   private lastRefreshTime: number = 0;
-  private refreshIntervalMs = 30000; // 30 seconds refresh interval
+  private refreshIntervalMs = 30000;
 
   constructor({
     hcsClient,
@@ -41,25 +45,26 @@ export class ManageConnectionRequestsTool extends StructuredTool {
     super(rest);
     this.hcsClient = hcsClient;
     this.stateManager = stateManager;
-    this.logger = Logger.getInstance({ module: 'ManageConnectionRequestsTool', level: 'debug' });
+    this.logger = Logger.getInstance({
+      module: 'ManageConnectionRequestsTool',
+      level: 'debug',
+    });
   }
 
   protected async _call({
     action,
-    requestId
+    requestId,
   }: z.infer<this['schema']>): Promise<string> {
     const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
       return 'Error: Cannot manage connection requests. No agent is currently active. Please register or select an agent first.';
     }
 
-    // Validate parameters based on action
     if ((action === 'view' || action === 'reject') && requestId === undefined) {
       return `Error: Request ID is required for the "${action}" action. Use the "list" action first to see available requests.`;
     }
 
     try {
-      // Refresh connection requests if needed
       await this.refreshRequestsIfNeeded();
 
       switch (action) {
@@ -74,7 +79,9 @@ export class ManageConnectionRequestsTool extends StructuredTool {
       }
     } catch (error) {
       this.logger.error(`Error in ManageConnectionRequestsTool: ${error}`);
-      return `Error managing connection requests: ${error instanceof Error ? error.message : String(error)}`;
+      return `Error managing connection requests: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
   }
 
@@ -91,35 +98,36 @@ export class ManageConnectionRequestsTool extends StructuredTool {
       const inboundTopicId = await this.hcsClient.getInboundTopicId();
       const outboundTopicId = await this.hcsClient.getOutboundTopicId();
       if (!inboundTopicId || !outboundTopicId) {
-        throw new Error('Could not find inbound or outbound topic ID for the current agent');
+        throw new Error(
+          'Could not find inbound or outbound topic ID for the current agent'
+        );
       }
 
-      // 1. Fetch confirmations SENT BY THIS AGENT from its outbound topic
-      const outboundMessagesResult = await this.hcsClient.getMessages(outboundTopicId);
+      const outboundMessagesResult = await this.hcsClient.getMessages(
+        outboundTopicId
+      );
       const outboundConfirmations = outboundMessagesResult.messages.filter(
-        msg => msg.op === 'connection_created' && msg.connection_request_id
+        (msg) => msg.op === 'connection_created' && msg.connection_request_id
       );
       const confirmedRequestIds = new Set(
-        outboundConfirmations.map(conf => conf.connection_request_id)
+        outboundConfirmations.map((conf) => conf.connection_request_id)
       );
 
-      // 2. Fetch incoming connection requests from the inbound topic
-      const inboundMessagesResult = await this.hcsClient.getMessages(inboundTopicId);
+      const inboundMessagesResult = await this.hcsClient.getMessages(
+        inboundTopicId
+      );
       const incomingRequests = inboundMessagesResult.messages.filter(
-        msg => msg.op === 'connection_request' && msg.sequence_number
+        (msg) => msg.op === 'connection_request' && msg.sequence_number
       );
 
-      // Clear existing requests
       this.stateManager.clearConnectionRequests();
 
-      // 3. Process and store requests IF they haven't been confirmed via outbound message
       const profilePromises = incomingRequests.map(async (request) => {
         const requestId = request.sequence_number;
         if (!requestId) {
           return;
         }
 
-        // Check if this agent has already sent a confirmation for this request ID
         if (confirmedRequestIds.has(requestId)) {
           return;
         }
@@ -129,35 +137,43 @@ export class ManageConnectionRequestsTool extends StructuredTool {
           return;
         }
 
-        // Fetch profile info (only if not already confirmed)
         let profile = undefined;
         try {
-          const profileResult = await this.hcsClient.getAgentProfile(requestorId);
+          const profileResult = await this.hcsClient.getAgentProfile(
+            requestorId
+          );
           if (profileResult.success && profileResult.profile) {
             profile = {
-              name: profileResult.profile.display_name || profileResult.profile.alias,
+              name:
+                profileResult.profile.display_name ||
+                profileResult.profile.alias,
               bio: profileResult.profile.bio,
               avatar: profileResult.profile.profileImage,
-              type: profileResult.profile.type
+              type: profileResult.profile.type,
             };
           }
         } catch (profileError) {
-          this.logger.warn(`Could not fetch profile for ${requestorId}: ${profileError}`);
+          this.logger.warn(
+            `Could not fetch profile for ${requestorId}: ${profileError}`
+          );
         }
 
-        // Store request in the state manager
         this.stateManager.addConnectionRequest({
           id: requestId,
           requestorId,
           requestorName: profile?.name || `Agent ${requestorId}`,
           timestamp: new Date(request.created || Date.now()),
           memo: request.m,
-          profile
+          profile,
         });
       });
 
       await Promise.allSettled(profilePromises);
-      this.logger.info(`Found ${this.stateManager.listConnectionRequests().length} pending connection requests`);
+      this.logger.info(
+        `Found ${
+          this.stateManager.listConnectionRequests().length
+        } pending connection requests`
+      );
     } catch (error) {
       this.logger.error(`Error refreshing connection requests: ${error}`);
       throw error;
@@ -171,7 +187,9 @@ export class ManageConnectionRequestsTool extends StructuredTool {
     }
 
     let output = `Found ${requests.length} pending connection request(s):\n\n`;
-    const sortedRequests = [...requests].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    const sortedRequests = [...requests].sort(
+      (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+    );
 
     sortedRequests.forEach((request, index) => {
       output += `${index + 1}. Request ID: ${request.id}\n`;
@@ -183,8 +201,10 @@ export class ManageConnectionRequestsTool extends StructuredTool {
       output += '\n';
     });
 
-    output += 'To view more details about a request, use action="view" with the specific requestId.\n';
-    output += 'To reject a request, use action="reject" with the specific requestId.';
+    output +=
+      'To view more details about a request, use action="view" with the specific requestId.\n';
+    output +=
+      'To reject a request, use action="reject" with the specific requestId.';
     return output;
   }
 
@@ -221,7 +241,8 @@ export class ManageConnectionRequestsTool extends StructuredTool {
 
     output += '\nActions:\n';
     output += `- To reject this request: action="reject", requestId=${requestId}\n`;
-    output += 'Use the separate "accept_connection_request" tool to accept requests.';
+    output +=
+      'Use the separate "accept_connection_request" tool to accept requests.';
     return output;
   }
 
@@ -237,7 +258,9 @@ export class ManageConnectionRequestsTool extends StructuredTool {
 
   private extractAccountId(request: HCSMessage): string | undefined {
     if (request.operator_id) {
-      return this.hcsClient.standardClient.extractAccountFromOperatorId(request.operator_id);
+      return this.hcsClient.standardClient.extractAccountFromOperatorId(
+        request.operator_id
+      );
     }
     return undefined;
   }

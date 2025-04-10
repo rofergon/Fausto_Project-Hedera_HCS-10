@@ -1,5 +1,7 @@
 // src/hcs10/types.ts
 
+import { FeeConfigBuilderInterface } from '@hashgraphonline/standards-sdk';
+
 /**
  * Agent metadata interface used during registration.
  */
@@ -12,6 +14,9 @@ export interface AgentMetadata {
     capabilities?: number[];
     social?: Record<string, string>;
     properties?: Record<string, unknown>;
+    socials?: Record<string, string>;
+    creator?: string;
+    feeConfig?: FeeConfigBuilderInterface;
 }
 
 /**

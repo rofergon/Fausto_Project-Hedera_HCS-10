@@ -12,9 +12,20 @@ import {
   ProfileResponse as SDKProfileResponse,
   HCSMessage,
   LogLevel,
+  Logger,
+  FeeConfigBuilderInterface,
+  SocialPlatform,
 } from '@hashgraphonline/standards-sdk';
 import { AgentMetadata, AgentChannels } from './types';
 import { encryptMessage } from '../utils/Encryption';
+
+// Keep type alias as they were removed accidentally
+type StandardHandleConnectionRequest =
+  InstanceType<typeof StandardSDKClient>['handleConnectionRequest'];
+type HandleConnectionRequestResponse = Awaited<
+  ReturnType<StandardHandleConnectionRequest>
+>;
+export type StandardNetworkType = 'mainnet' | 'testnet';
 
 export interface HCSMessageWithTimestamp extends HCSMessage {
   timestamp: number;
@@ -25,16 +36,8 @@ export interface HCSMessageWithTimestamp extends HCSMessage {
 export interface ExtendedAgentMetadata extends AgentMetadata {
   pfpBuffer?: Buffer;
   pfpFileName?: string;
+  feeConfig?: FeeConfigBuilderInterface;
 }
-
-type StandardHandleConnectionRequest = InstanceType<
-  typeof StandardSDKClient
->['handleConnectionRequest'];
-type FeeConfigBuilderInterface = Parameters<StandardHandleConnectionRequest>[3];
-type HandleConnectionRequestResponse = Awaited<
-  ReturnType<StandardHandleConnectionRequest>
->;
-export type StandardNetworkType = 'mainnet' | 'testnet';
 
 /**
  * HCS10Client wraps the HCS-10 functionalities using the @hashgraphonline/standards-sdk.
@@ -47,6 +50,7 @@ export class HCS10Client {
   private useEncryption: boolean;
   public agentChannels?: AgentChannels;
   public guardedRegistryBaseUrl: string;
+  public logger: Logger;
 
   constructor(
     operatorId: string,
@@ -67,6 +71,9 @@ export class HCS10Client {
     });
     this.guardedRegistryBaseUrl = options?.registryUrl || '';
     this.useEncryption = options?.useEncryption || false;
+    this.logger = new Logger({
+      level: options?.logLevel || 'info',
+    });
   }
 
   public getOperatorId(): string {
@@ -96,7 +103,7 @@ export class HCS10Client {
       );
       return result;
     } catch (error) {
-      console.error(
+      this.logger.error(
         `Error handling connection request #${connectionRequestId} for topic ${inboundTopicId}:`,
         error
       );
@@ -125,7 +132,7 @@ export class HCS10Client {
     return this.standardClient.submitConnectionRequest(
       inboundTopicId,
       memo
-    ) as any;
+    ) as Promise<TransactionReceipt>;
   }
 
   /**
@@ -148,45 +155,55 @@ export class HCS10Client {
   /**
    * Creates and registers an agent using the standard SDK's HCS10Client.
    * This handles account creation, key generation, topic setup, and registration.
-   * @param metadata - The agent's metadata, potentially including pfpBuffer and pfpFileName.
+   *
+   * When metadata includes fee configuration:
+   * 1. The properties.feeConfig will be passed to the AgentBuilder
+   * 2. The properties.inboundTopicType will be set to FEE_BASED
+   * 3. The SDK's createAndRegisterAgent will apply the fees to the agent's inbound topic
+   *
+   * @param metadata - The agent's metadata, potentially including pfpBuffer, pfpFileName,
+   *                   and fee configuration in properties.feeConfig
    * @returns The registration result from the standard SDK, containing accountId, keys, topics etc.
    */
   public async createAndRegisterAgent(
     metadata: ExtendedAgentMetadata
   ): Promise<AgentRegistrationResult> {
-    const builder = new AgentBuilder();
-
-    builder
+    const builder = new AgentBuilder()
       .setName(metadata.name)
-      .setDescription(metadata.description || '')
+      .setBio(metadata.description || '')
       .setCapabilities(
         metadata.capabilities
           ? metadata.capabilities
           : [StandardAIAgentCapability.TEXT_GENERATION]
       )
-      .setAgentType((metadata.type || 'autonomous') as 'autonomous' | 'manual')
+      .setType((metadata.type || 'autonomous') as 'autonomous' | 'manual')
       .setModel(metadata.model || 'agent-model-2024')
       .setNetwork(this.getNetwork())
       .setInboundTopicType(StandardInboundTopicType.PUBLIC);
 
+    if (metadata?.feeConfig) {
+      builder.setInboundTopicType(StandardInboundTopicType.FEE_BASED);
+      builder.setFeeConfig(metadata.feeConfig);
+    }
+
     if (metadata.pfpBuffer && metadata.pfpFileName) {
       if (metadata.pfpBuffer.byteLength === 0) {
-        console.warn('Provided PFP buffer is empty. Skipping profile picture.');
+        this.logger.warn('Provided PFP buffer is empty. Skipping profile picture.');
       } else {
-        console.log(
+        this.logger.info(
           `Setting profile picture: ${metadata.pfpFileName} (${metadata.pfpBuffer.byteLength} bytes)`
         );
         builder.setProfilePicture(metadata.pfpBuffer, metadata.pfpFileName);
       }
     } else {
-      console.warn(
+      this.logger.warn(
         'Profile picture not provided in metadata. Agent creation might fail if required by the underlying SDK builder.'
       );
     }
 
     if (metadata.social) {
       Object.entries(metadata.social).forEach(([platform, handle]) => {
-        builder.addSocial(platform as any, handle);
+        builder.addSocial(platform as SocialPlatform, handle);
       });
     }
 
@@ -197,7 +214,10 @@ export class HCS10Client {
     }
 
     try {
-      const result = await this.standardClient.createAndRegisterAgent(builder);
+      const hasFees = Boolean(metadata?.feeConfig);
+      const result = await this.standardClient.createAndRegisterAgent(builder, {
+        initialBalance: hasFees ? 50 : undefined,
+      });
       if (
         result?.metadata?.inboundTopicId &&
         result?.metadata?.outboundTopicId
@@ -209,7 +229,7 @@ export class HCS10Client {
       }
       return result;
     } catch (error) {
-      console.error('Error during agent creation/registration:', error);
+      this.logger.error('Error during agent creation/registration:', error);
       throw new Error(
         `Failed to create/register agent: ${
           error instanceof Error ? error.message : String(error)
@@ -233,7 +253,7 @@ export class HCS10Client {
     topicId: string,
     data: string,
     memo?: string,
-    submitKey?: PrivateKey
+    submitKey?: any
   ): Promise<number | undefined> {
     if (this.useEncryption) {
       data = encryptMessage(data);
@@ -244,11 +264,11 @@ export class HCS10Client {
         topicId,
         data,
         memo,
-        submitKey as any
+        submitKey
       );
       return messageResponse.topicSequenceNumber?.toNumber();
     } catch (error) {
-      console.error(`Error sending message to topic ${topicId}:`, error);
+      this.logger.error(`Error sending message to topic ${topicId}:`, error);
       throw new Error(
         `Failed to send message: ${
           error instanceof Error ? error.message : String(error)
@@ -285,7 +305,7 @@ export class HCS10Client {
       );
       return { messages: mappedMessages };
     } catch (error) {
-      console.error(`Error getting messages from topic ${topicId}:`, error);
+      this.logger.error(`Error getting messages from topic ${topicId}:`, error);
       return { messages: [] };
     }
   }
@@ -308,7 +328,7 @@ export class HCS10Client {
       );
       return content;
     } catch (error) {
-      console.error(
+      this.logger.error(
         `Error retrieving message content for: ${inscriptionIdOrData}`,
         error
       );
@@ -329,12 +349,12 @@ export class HCS10Client {
   public async getInboundTopicId(): Promise<string> {
     try {
       const operatorId = this.getOperatorId();
-      console.log(
+      this.logger.info(
         `[HCS10Client] Retrieving profile for operator ${operatorId} to find inbound topic...`
       );
       const profileResponse = await this.getAgentProfile(operatorId);
       if (profileResponse.success && profileResponse.topicInfo?.inboundTopic) {
-        console.log(
+        this.logger.info(
           `[HCS10Client] Found inbound topic for operator ${operatorId}: ${profileResponse.topicInfo.inboundTopic}`
         );
         return profileResponse.topicInfo.inboundTopic;
@@ -344,7 +364,7 @@ export class HCS10Client {
         );
       }
     } catch (error) {
-      console.error(
+      this.logger.error(
         `[HCS10Client] Error fetching operator's inbound topic ID (${this.getOperatorId()}):`,
         error
       );
