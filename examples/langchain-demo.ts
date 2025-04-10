@@ -62,7 +62,7 @@ async function initialize() {
   try {
     // --- Load Environment Variables ---
     const operatorId = process.env.HEDERA_OPERATOR_ID!;
-    const operatorKey = process.env.HEDERA_PRIVATE_KEY!;
+    const operatorKey = process.env.HEDERA_OPERATOR_KEY!;
     const network = process.env.HEDERA_NETWORK || 'testnet';
     const openaiApiKey = process.env.OPENAI_API_KEY!;
     const registryUrl = process.env.REGISTRY_URL;
