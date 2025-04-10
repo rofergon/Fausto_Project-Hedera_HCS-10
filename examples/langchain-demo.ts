@@ -61,14 +61,14 @@ async function initialize() {
   try {
     // --- Load Environment Variables ---
     const operatorId = process.env.HEDERA_OPERATOR_ID!;
-    const operatorKey = process.env.HEDERA_PRIVATE_KEY!;
+    const operatorKey = process.env.HEDERA_OPERATOR_KEY!;
     const network = process.env.HEDERA_NETWORK || "testnet";
     const openaiApiKey = process.env.OPENAI_API_KEY!;
     const registryUrl = process.env.REGISTRY_URL;
 
     if (!operatorId || !operatorKey) {
       throw new Error(
-        "HEDERA_OPERATOR_ID and HEDERA_PRIVATE_KEY must be set in .env for initial client setup.",
+        "HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY must be set in .env for initial client setup.",
       );
     }
     if (!openaiApiKey) {
