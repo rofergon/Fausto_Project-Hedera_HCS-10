@@ -22,7 +22,6 @@ module.exports = {
     curly: ['error', 'all'],
     eqeqeq: ['error', 'always'],
     'no-trailing-spaces': 'error',
-    quotes: ['error', 'single', { avoidEscape: true }],
     semi: ['error', 'always'],
     'arrow-body-style': ['error', 'as-needed'],
     'no-unused-vars': 'error',

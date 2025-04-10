@@ -6,11 +6,17 @@
 
 A toolkit built with TypeScript and LangChain for creating AI agents that communicate trustlessly on the Hedera network using the [HCS-10 AI Agent Communication Standard](https://hashgraphonline.com/docs/standards/hcs-10/).
 
-This kit provides:
+## Quick Start
 
-- A client (`HCS10Client`) simplifying interactions with the HCS-10 standard via the `@hashgraphonline/standards-sdk`.
-- LangChain Tools (`RegisterAgentTool`, `SendMessageTool`, `ConnectionTool`) for easy integration into LangChain agents.
-- Example demos showcasing agent registration, connection monitoring, and messaging.
+```bash
+npm install @hashgraphonline/standards-agent-kit
+```
+
+## Documentation
+
+For complete documentation, examples, and API references, visit:
+
+- [Standards Agent Kit Documentation](https://hashgraphonline.com/docs/libraries/standards-agent-kit/)
 
 ## Features
 
@@ -18,174 +24,126 @@ This kit provides:
 - **Agent Lifecycle Management:** Create, register, and manage HCS-10 agents on Hedera.
 - **Trustless Communication:** Facilitates secure peer-to-peer communication setup between agents via Hedera Consensus Service (HCS).
 - **LangChain Integration:** Provides ready-to-use LangChain `StructuredTool`s for common agent actions.
-- **Message Handling:** Send and receive messages over HCS, including support for large messages via HCS-3 inscriptions (handled by the underlying SDK).
+- **Message Handling:** Send and receive messages over HCS, including support for large messages via HCS-3 inscriptions.
 - **Connection Monitoring:** Automatically monitor inbound topics for connection requests and handle them.
 - **Configurable:** Set Hedera network, credentials, and registry via environment variables.
 
-## Prerequisites
+## Supported Tools
 
-- **Node.js:** Version 18 or higher recommended.
-- **npm:** Node Package Manager (usually comes with Node.js).
-- **Hedera Testnet Account:** You need an Account ID and Private Key for the Hedera Testnet. You can get one from [Hedera Portal](https://portal.hedera.com/).
-- **(Optional) OpenAI API Key:** Required for running the LangChain agent demos (`examples/interactive-demo.ts`).
+- **RegisterAgentTool**: Create and register a new HCS-10 agent
+- **SendMessageTool**: Send messages to a topic with optional response monitoring
+- **ConnectionTool**: Monitor inbound topics for connection requests
+- **FindRegistrationsTool**: Search for agent registrations by criteria
+- **InitiateConnectionTool**: Start a connection with another agent
+- **ListConnectionsTool**: View existing agent connections
+- **ConnectionMonitorTool**: Monitor connection status changes
+- **ManageConnectionRequestsTool**: Handle incoming connection requests
+- **AcceptConnectionRequestTool**: Accept pending connection requests
+- **ListUnapprovedConnectionRequestsTool**: View pending requests
 
-## Installation
+## Running Demos
 
-1.  **Clone the repository:**
+The Agent Kit includes demo implementations that showcase various features. Follow these steps to run them:
 
-    ```bash
-    git clone <your-repository-url>
-    cd hashgraph-online-agent-kit
-    ```
+1. Clone the repository
 
-2.  **Install dependencies:**
-    This project has known peer dependency conflicts between different versions of LangChain packages. Use the `--legacy-peer-deps` flag to install:
-    ```bash
-    npm install --legacy-peer-deps
-    ```
+   ```bash
+   git clone https://github.com/hashgraph/standards-agent-kit.git
+   cd standards-agent-kit
+   ```
 
-## Configuration
+2. Install dependencies
 
-1.  **Create a `.env` file:** Copy the example file:
+   ```bash
+   npm install --legacy-peer-deps
+   ```
 
-    ```bash
-    cp .env.sample .env
-    ```
+3. Set up environment variables
 
-2.  **Edit `.env`:** Fill in your Hedera credentials and optionally other settings:
+   ```bash
+   cp .env.sample .env
+   ```
 
-    ```dotenv
-    # Hedera Credentials (Required)
-    HEDERA_ACCOUNT_ID=0.0.xxxxxx
-    HEDERA_PRIVATE_KEY=302e020100300506032b6570...
+4. Edit the `.env` file with your Hedera credentials:
 
-    # Hedera Network (Optional - defaults to 'testnet')
-    HEDERA_NETWORK=testnet
+   ```
+   HEDERA_ACCOUNT_ID=0.0.xxxxxx
+   HEDERA_PRIVATE_KEY=302e020100300506032b6570...
+   HEDERA_NETWORK=testnet
+   REGISTRY_URL=https://moonscape.tech
+   OPENAI_API_KEY=sk-xxxxxxxxxx  # For LangChain demos
+   ```
 
-    # HCS-10 Registry URL (Optional - defaults to SDK's default https://moonscape.tech)
-    REGISTRY_URL=https://moonscape.tech
+5. Run the demos:
 
-    # OpenAI API Key (Optional - needed for LangChain demos)
-    OPENAI_API_KEY=sk-xxxxxxxxxx
+   ```bash
+   # Run the CLI demo
+   npm run cli-demo
 
-    # --- Agent Specific Variables (Optional - used/set by demos) ---
-    # These might be populated automatically by demos like cli-demo
-    ALICE_ACCOUNT_ID=
-    ALICE_PRIVATE_KEY=
-    ALICE_INBOUND_TOPIC_ID=
-    ALICE_OUTBOUND_TOPIC_ID=
-    BOB_ACCOUNT_ID=
-    BOB_PRIVATE_KEY=
-    BOB_INBOUND_TOPIC_ID=
-    BOB_OUTBOUND_TOPIC_ID=
-    CONNECTION_TOPIC_ID=
-    OPERATOR_ID=
-    ```
+   # Run the LangChain interactive demo
+   npm run langchain-demo
+   ```
 
-## Usage
+### Demo Descriptions
 
-### Initialization
+#### CLI Demo
 
-The primary way to use the kit is by initializing the client and tools using the `initializeHCS10Client` function from the main entry point (`src/index.ts`). This requires your operator account ID and private key to be set in the environment variables.
+The CLI demo provides an interactive menu to:
+- Register new agents
+- List managed agents
+- Initiate and monitor connections
+- Send and receive messages between agents
+
+#### LangChain Interactive Demo
+
+The LangChain demo demonstrates how to:
+- Integrate Standards Agent Kit tools with LangChain
+- Create AI agents that communicate over Hedera
+- Process natural language requests into agent actions
+- Handle the full lifecycle of agent-to-agent communication
+
+## Basic Usage
 
 ```typescript
-import { initializeHCS10Client } from 'hashgraph-online-agent-kit'; // Adjust path based on usage
+import { initializeHCS10Client } from '@hashgraphonline/standards-agent-kit';
 import dotenv from 'dotenv';
 
-dotenv.config(); // Load .env variables
+dotenv.config();
 
 async function setup() {
-  try {
-    const { hcs10Client, tools } = await initializeHCS10Client({
-      // Options are optional
-      useEncryption: false, // Defaults to false
-      registryUrl: process.env.REGISTRY_URL, // Defaults to SDK's default
-    });
+  const { hcs10Client, tools, stateManager } = await initializeHCS10Client({
+    clientConfig: {
+      operatorId: process.env.HEDERA_ACCOUNT_ID,
+      operatorKey: process.env.HEDERA_PRIVATE_KEY,
+      network: 'testnet',
+      useEncryption: false
+    },
+    createAllTools: true,
+    monitoringClient: true
+  });
 
-    console.log('HCS10 Client and Tools Initialized!');
-
-    // Now you can use hcs10Client directly or use the tools
-    const registerTool = tools.registerAgentTool;
-    const sendMessageTool = tools.sendMessageTool;
-    const connectionTool = tools.connectionTool;
-
-    // Example: Register an agent using the tool
-    // const registrationResult = await registerTool.call({ name: "MyDemoAgent" });
-    // console.log(registrationResult);
-  } catch (error) {
-    console.error('Initialization failed:', error);
-  }
+  // Access tools
+  const { registerAgentTool, initiateConnectionTool, sendMessageTool } = tools;
+  
+  // Use tools as needed
+  // ...
 }
 
 setup();
 ```
 
-### Core Components
+For detailed usage examples and API reference, please refer to the [official documentation](https://hashgraphonline.com/docs/libraries/standards-agent-kit/).
 
-- **`HCS10Client` (`src/hcs10/HCS10Client.ts`):**
-  - Wraps the `@hashgraphonline/standards-sdk` HCS10Client.
-  - Provides methods like `createAndRegisterAgent`, `sendMessage`, `getMessages`, `handleConnectionRequest`, `getMessageContent`.
-  - Initialized via the static async factory `HCS10Client.create(operatorId, privateKey, network, options)`.
-- **Tools (`src/tools/`):**
-  - `RegisterAgentTool`: LangChain tool to create and register a new HCS-10 agent.
-  - `SendMessageTool`: LangChain tool to send a message to a topic and optionally monitor for a response.
-  - `ConnectionTool`: LangChain tool to start monitoring an agent's inbound topic for connection requests and handle them automatically in the background.
+## Resources
 
-## Running Demos
-
-Make sure you have configured your `.env` file correctly.
-
-1.  **Build the project:**
-
-    ```bash
-    npm run build
-    ```
-
-    _(Note: `npm install` also runs the build via the `prepare` script)_
-
-2.  **Run the CLI Demo:**
-    This demo provides an interactive menu to register an agent and monitor its connections.
-
-    ```bash
-    npm run cli-demo
-    ```
-
-3.  **Run the LangChain Interactive Demo:**
-    This demo uses LangChain to create an agent that can use the HCS-10 tools. Requires `OPENAI_API_KEY` in `.env`.
-    ```bash
-    npm run langchain-demo
-    ```
-
-## Project Structure
-
-```
-.
-├── dist/               # Compiled JavaScript output
-├── examples/           # Demo usage scripts
-│   ├── cli-demo.ts     # Interactive CLI demo
-│   ├── langchain-demo.ts # LangChain agent interactive demo
-│   └── ...
-├── src/                # Source code
-│   ├── hcs10/          # HCS-10 client and types
-│   │   ├── HCS10Client.ts # Main client wrapper
-│   │   └── types.ts       # Core data types
-│   ├── tools/          # LangChain tools
-│   │   ├── RegisterAgentTool.ts
-│   │   ├── SendMessageTool.ts
-│   │   └── ConnectionTool.ts
-│   ├── utils/          # Utility functions (logging, Hedera client setup)
-│   └── index.ts        # Main entry point, initializes client/tools
-├── tests/              # Unit tests
-├── .env.sample         # Sample environment file
-├── package.json        # Project dependencies and scripts
-├── tsconfig.json       # TypeScript configuration
-└── README.md           # This file
-```
+- [HCS Standards Documentation](https://hashgraphonline.com/docs/standards/)
+- [Hedera Documentation](https://docs.hedera.com)
+- [Standards SDK](https://hashgraphonline.com/docs/libraries/standards-sdk/)
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request. (Add more specific guidelines if needed).
+Contributions are welcome! Please open an issue or submit a pull request.
 
 ## License
 
-This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
+Apache-2.0

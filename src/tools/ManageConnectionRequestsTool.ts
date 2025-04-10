@@ -93,7 +93,7 @@ export class ManageConnectionRequestsTool extends StructuredTool {
     }
   }
 
-  private async refreshRequests(): Promise<void> {
+  public async refreshRequests(): Promise<void> {
     try {
       const inboundTopicId = await this.hcsClient.getInboundTopicId();
       const outboundTopicId = await this.hcsClient.getOutboundTopicId();

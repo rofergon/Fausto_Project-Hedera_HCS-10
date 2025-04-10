@@ -14,7 +14,8 @@ import { InitiateConnectionTool } from '../src/tools/InitiateConnectionTool';
 import { ListConnectionsTool } from '../src/tools/ListConnectionsTool';
 import { SendMessageToConnectionTool } from '../src/tools/SendMessageToConnectionTool';
 import { SendMessageTool } from '../src/tools/SendMessageTool';
-import { IStateManager, OpenConvaiState } from '../src/state/open-convai-state';
+import { IStateManager } from '../src/state/state-types';
+import { OpenConvaiState } from '../src/state/open-convai-state';
 
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
@@ -25,10 +26,18 @@ import {
   MessagesPlaceholder,
 } from '@langchain/core/prompts';
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { HCS11Profile, ProfileResponse } from '@hashgraphonline/standards-sdk';
 import { RetrieveProfileTool } from '../src/tools/RetrieveProfileTool';
 
 dotenv.config();
+
+interface AgentIdentity {
+  name: string;
+  accountId: string;
+  privateKey: string;
+  inboundTopicId: string;
+  outboundTopicId: string;
+  profileTopicId?: string;
+}
 
 // --- Configuration ---
 const AGENT_PERSONALITY = `You are a helpful assistant managing Hedera HCS-10 connections and messages.
@@ -55,6 +64,80 @@ let agentExecutor: AgentExecutor;
 let memory: ConversationTokenBufferMemory;
 let connectionMonitor: ConnectionTool | null = null;
 let connectionMonitorTool: ConnectionMonitorTool | null = null;
+let tools: StructuredToolInterface[] = [];
+
+/**
+ * Loads agent details from environment variables using a specified prefix
+ */
+async function loadAgentFromEnv(prefix: string): Promise<AgentIdentity | null> {
+  const accountId = process.env[`${prefix}_ACCOUNT_ID`];
+  const privateKey = process.env[`${prefix}_PRIVATE_KEY`];
+  const inboundTopicId = process.env[`${prefix}_INBOUND_TOPIC_ID`];
+  const outboundTopicId = process.env[`${prefix}_OUTBOUND_TOPIC_ID`];
+  const profileTopicId = process.env[`${prefix}_PROFILE_TOPIC_ID`];
+
+  if (!accountId || !privateKey || !inboundTopicId || !outboundTopicId) {
+    console.log(`Incomplete agent details for prefix ${prefix}, skipping.`);
+    return null;
+  }
+
+  return {
+    name: `${prefix} Agent`,
+    accountId,
+    privateKey,
+    inboundTopicId,
+    outboundTopicId,
+    profileTopicId,
+  };
+}
+
+/**
+ * Displays available agents and prompts user to select one
+ */
+async function promptUserToSelectAgent(
+  agents: AgentIdentity[]
+): Promise<AgentIdentity | null> {
+  if (agents.length === 0) {
+    console.log('No agents available. Please register a new agent first.');
+    return null;
+  }
+
+  if (agents.length === 1) {
+    console.log(`Auto-selecting the only available agent: ${agents[0].name}`);
+    return agents[0];
+  }
+
+  console.log('\nAvailable agents:');
+  agents.forEach((agent, index) => {
+    console.log(`${index + 1}. ${agent.name} (${agent.accountId})`);
+  });
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const choice = await new Promise<string>((resolve) => {
+    rl.question(
+      'Select agent number (or press Enter to use first agent): ',
+      resolve
+    );
+  });
+  rl.close();
+
+  if (!choice.trim()) {
+    console.log(`Defaulting to first agent: ${agents[0].name}`);
+    return agents[0];
+  }
+
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= agents.length) {
+    console.log(`Invalid choice. Defaulting to first agent: ${agents[0].name}`);
+    return agents[0];
+  }
+
+  return agents[index];
+}
 
 // --- Initialization ---
 async function initialize() {
@@ -101,47 +184,73 @@ async function initialize() {
       }
     );
 
-    // Instantiate the renamed state class
+    // Instantiate the state class with default prefix TODD
     stateManager = new OpenConvaiState();
+    console.log('State manager initialized with default prefix: TODD');
 
-    // Use TODD details if available, now using setClient
-    if (process.env.TODD_PRIVATE_KEY && process.env.TODD_ACCOUNT_ID) {
-      console.log(
-        `Setting client identity to TODD: ${process.env.TODD_ACCOUNT_ID}`
-      );
-      hcsClient.setClient(
-        process.env.TODD_ACCOUNT_ID,
-        process.env.TODD_PRIVATE_KEY
-      );
-      monitoringHcsClient.setClient(
-        process.env.TODD_ACCOUNT_ID,
-        process.env.TODD_PRIVATE_KEY
-      );
-      const toddProfile = (await hcsClient.getAgentProfile(
-        process.env.TODD_ACCOUNT_ID
-      )) as ProfileResponse;
-      if (toddProfile.success && toddProfile.topicInfo) {
-        stateManager.setCurrentAgent({
-          name: (toddProfile.profile as HCS11Profile).display_name,
-          accountId: process.env.TODD_ACCOUNT_ID,
-          inboundTopicId: toddProfile.topicInfo.inboundTopic,
-          outboundTopicId: toddProfile.topicInfo.outboundTopic,
-        });
-      } else {
-        console.warn(
-          'Could not retrieve TODD profile, using operator details.'
+    // --- Load all known agents from environment variables ---
+    const knownPrefixes = (process.env.KNOWN_AGENT_PREFIXES || 'TODD')
+      .split(',')
+      .map((prefix) => prefix.trim())
+      .filter((prefix) => prefix.length > 0);
+
+    console.log(
+      `Found ${
+        knownPrefixes.length
+      } known agent prefix(es): ${knownPrefixes.join(', ')}`
+    );
+
+    const loadedAgents: AgentIdentity[] = [];
+    for (const prefix of knownPrefixes) {
+      const agent = await loadAgentFromEnv(prefix);
+      if (agent) {
+        loadedAgents.push(agent);
+        console.log(`Loaded agent: ${agent.name} (${agent.accountId})`);
+      }
+    }
+
+    // --- Prompt user to select an agent if multiple are available ---
+    if (loadedAgents.length > 0) {
+      const selectedAgent = await promptUserToSelectAgent(loadedAgents);
+
+      if (selectedAgent) {
+        console.log(
+          `Using agent: ${selectedAgent.name} (${selectedAgent.accountId})`
         );
+
+        // Configure clients with selected identity
+        hcsClient.setClient(selectedAgent.accountId, selectedAgent.privateKey);
+
+        monitoringHcsClient.setClient(
+          selectedAgent.accountId,
+          selectedAgent.privateKey
+        );
+
+        // Update state manager
+        stateManager.setCurrentAgent({
+          name: selectedAgent.name,
+          accountId: selectedAgent.accountId,
+          inboundTopicId: selectedAgent.inboundTopicId,
+          outboundTopicId: selectedAgent.outboundTopicId,
+          profileTopicId: selectedAgent.profileTopicId,
+        });
+
+        console.log(`Client configured to use ${selectedAgent.name}.`);
+      } else {
+        console.log('No agent selected. Using initial operator identity.');
       }
     } else {
-      console.log(`Using initial operator identity: ${operatorId}`);
+      console.log(
+        `No registered agents found. Using initial operator identity: ${operatorId}`
+      );
     }
 
     console.log(
       `HCS client configured for operator ${hcsClient.getOperatorId()} on ${hederaNetwork}.`
     );
 
-    // --- Instantiate Tools as an Array, passing stateManager via stateManager ---
-    const tools: StructuredToolInterface[] = [
+    // --- Instantiate Tools as an Array, passing stateManager ---
+    tools = [
       new RegisterAgentTool(hcsClient),
       new FindRegistrationsTool({ hcsClient }),
       new InitiateConnectionTool({ hcsClient, stateManager }),
@@ -225,41 +334,115 @@ async function initialize() {
   }
 }
 
-const runMonitoring = async () => {
-  // --- Start Connection Monitoring ---
+/**
+ * Initializes monitoring for connections with proper Promise handling
+ */
+async function runMonitoring(): Promise<void> {
+  const monitoringPromises = [];
+
   if (connectionMonitor) {
     console.log('Attempting to start background connection monitoring...');
     try {
-      await connectionMonitor.call({}); // Use public method instead of protected _call
-      console.log('Background connection monitor initiated.');
+      const monitorPromise = connectionMonitor.invoke({});
+      monitoringPromises.push(monitorPromise);
+
+      monitorPromise
+        .then(() => {
+          console.log('Background connection monitor initiated.');
+        })
+        .catch((err) => {
+          console.error(
+            'Could not get inbound topic ID to start monitor:',
+            err
+          );
+          console.warn('Connection monitoring could not be started.');
+        });
     } catch (err) {
-      console.error('Could not get inbound topic ID to start monitor:', err);
-      console.warn('Connection monitoring could not be started.');
+      console.error('Error initializing connection monitor:', err);
     }
   } else {
     console.warn('ConnectionTool instance not found, cannot monitor.');
   }
 
-  // Start ConnectionMonitorTool in the background with default settings
   if (connectionMonitorTool) {
     console.log(
       'Attempting to start ConnectionMonitorTool with 300 second monitoring...'
     );
     try {
-      await connectionMonitorTool.call({
+      const toolMonitorPromise = connectionMonitorTool.invoke({
         monitorDurationSeconds: 300,
         acceptAll: false,
       });
-      console.log(
-        'ConnectionMonitorTool started to watch for connection requests.'
-      );
+      monitoringPromises.push(toolMonitorPromise);
+
+      toolMonitorPromise
+        .then(() => {
+          console.log(
+            'ConnectionMonitorTool started to watch for connection requests.'
+          );
+        })
+        .catch((err) => {
+          console.error('Could not start ConnectionMonitorTool:', err);
+        });
     } catch (err) {
-      console.error('Could not start ConnectionMonitorTool:', err);
+      console.error('Error initializing ConnectionMonitorTool:', err);
     }
   }
-};
 
-// --- Chat Loop ---
+  // Wait for all promises to settle (either resolve or reject)
+  await Promise.allSettled(monitoringPromises);
+
+  // Add an additional delay to allow monitoring logs to complete
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  // Clear line to separate monitoring logs from chat
+  console.log('\n----------------------------------------');
+}
+
+/**
+ * Creates the LangChain agent with tools and memory
+ */
+async function setupAgent() {
+  const llm = new ChatOpenAI({
+    apiKey: process.env.OPENAI_API_KEY!,
+    modelName: 'gpt-4o',
+    temperature: 0,
+  });
+
+  memory = new ConversationTokenBufferMemory({
+    llm: llm,
+    memoryKey: 'chat_history',
+    returnMessages: true,
+    outputKey: 'output',
+    maxTokenLimit: 1000,
+  });
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    ['system', AGENT_PERSONALITY],
+    new MessagesPlaceholder('chat_history'),
+    ['human', '{input}'],
+    new MessagesPlaceholder('agent_scratchpad'),
+  ]);
+
+  const agent = await createOpenAIToolsAgent({
+    llm,
+    tools,
+    prompt,
+  });
+
+  agentExecutor = new AgentExecutor({
+    agent,
+    tools,
+    memory,
+    verbose: false,
+  });
+
+  console.log('LangChain agent initialized.');
+}
+
+/**
+ * Handles the main chat interaction loop
+ */
 async function chatLoop() {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -268,7 +451,6 @@ async function chatLoop() {
 
   console.log("\nAgent ready. Type your message or 'exit' to quit.");
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const userInput = await new Promise<string>((resolve) => {
       rl.question('You: ', resolve);
@@ -298,10 +480,26 @@ async function chatLoop() {
   }
 }
 
-// --- Main Execution ---
+/**
+ * Main program execution with clean sequential flow
+ */
 async function main() {
-  await initialize();
-  await chatLoop();
+  try {
+    // Step 1: Initialize client, state, and load agent identities
+    await initialize();
+
+    // Step 2: Set up LangChain agent with tools
+    await setupAgent();
+
+    // Step 3: Start monitoring and wait for it to complete initialization
+    await runMonitoring();
+
+    // Step 4: Only start chat loop after everything is fully ready
+    await chatLoop();
+  } catch (err) {
+    console.error('Unhandled error in main execution flow:', err);
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

@@ -1,121 +1,12 @@
-export interface RegisteredAgent {
-  name: string;
-  accountId: string;
-  inboundTopicId: string;
-  outboundTopicId: string;
-  profileTopicId?: string;
-}
-
-export type ConnectionStatus =
-  | 'established'
-  | 'pending'
-  | 'needs confirmation'
-  | 'unknown';
-
-export interface AgentProfileInfo {
-  name?: string;
-  bio?: string;
-  avatar?: string;
-  type?: string;
-}
-
-export interface ConnectionRequestInfo {
-  id: number;
-  requestorId: string;
-  requestorName: string;
-  timestamp: Date;
-  memo?: string;
-  profile?: AgentProfileInfo;
-}
-
-export interface ActiveConnection {
-  targetAccountId: string;
-  targetAgentName: string;
-  targetInboundTopicId: string;
-  connectionTopicId: string;
-  status?: ConnectionStatus;
-  created?: Date;
-  lastActivity?: Date;
-  isPending?: boolean;
-  needsConfirmation?: boolean;
-  profileInfo?: AgentProfileInfo;
-}
-
-/**
- * Core state management interface for the standards agent toolkit.
- * All tools that need to maintain state should use an implementation of this interface.
- */
-export interface IStateManager {
-  /**
-   * Sets the current active agent, clearing any previous connections.
-   */
-  setCurrentAgent(agent: RegisteredAgent | null): void;
-
-  /**
-   * Gets the current active agent.
-   */
-  getCurrentAgent(): RegisteredAgent | null;
-
-  /**
-   * Adds a new active connection to the state.
-   * Will not add duplicates based on connectionTopicId.
-   */
-  addActiveConnection(connection: ActiveConnection): void;
-
-  /**
-   * Updates an existing connection or adds it if not found.
-   * Preserves existing properties when updating.
-   */
-  updateOrAddConnection(connection: ActiveConnection): void;
-
-  /**
-   * Lists all active connections for the current agent.
-   */
-  listConnections(): ActiveConnection[];
-
-  /**
-   * Finds a connection by identifier, which can be:
-   * - A 1-based index number as shown in the connection list
-   * - A target account ID
-   * - A connection topic ID
-   */
-  getConnectionByIdentifier(identifier: string): ActiveConnection | undefined;
-
-  /**
-   * Gets the last processed message timestamp for a connection.
-   */
-  getLastTimestamp(connectionTopicId: string): number;
-
-  /**
-   * Updates the last processed message timestamp for a connection.
-   */
-  updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
-
-  /**
-   * Stores a connection request in the state.
-   */
-  addConnectionRequest(request: ConnectionRequestInfo): void;
-
-  /**
-   * Lists all pending connection requests.
-   */
-  listConnectionRequests(): ConnectionRequestInfo[];
-
-  /**
-   * Finds a connection request by its ID.
-   */
-  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined;
-
-  /**
-   * Removes a connection request from the state.
-   */
-  removeConnectionRequest(requestId: number): void;
-
-  /**
-   * Clears all connection requests from the state.
-   */
-  clearConnectionRequests(): void;
-}
+import { updateEnvFile } from '../../examples/utils';
+import {
+  RegisteredAgent,
+  ActiveConnection,
+  ConnectionRequestInfo,
+  IStateManager,
+  AgentPersistenceOptions,
+  EnvFilePersistenceOptions,
+} from './state-types';
 
 /**
  * Implementation of the IStateManager interface for the OpenConvai system.
@@ -127,6 +18,20 @@ export class OpenConvaiState implements IStateManager {
   private activeConnections: ActiveConnection[] = [];
   private connectionMessageTimestamps: Record<string, number> = {};
   private connectionRequests: Map<number, ConnectionRequestInfo> = new Map();
+  private defaultEnvFilePath?: string;
+  private defaultPrefix: string;
+
+  /**
+   * Creates a new OpenConvaiState instance
+   * @param options - Options for environment variable persistence
+   */
+  constructor(options?: {
+    defaultEnvFilePath?: string;
+    defaultPrefix?: string;
+  }) {
+    this.defaultEnvFilePath = options?.defaultEnvFilePath;
+    this.defaultPrefix = options?.defaultPrefix ?? 'TODD';
+  }
 
   /**
    * Sets the current active agent and clears any previous connection data.
@@ -261,7 +166,9 @@ export class OpenConvaiState implements IStateManager {
     return Array.from(this.connectionRequests.values());
   }
 
-  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined {
+  getConnectionRequestById(
+    requestId: number
+  ): ConnectionRequestInfo | undefined {
     return this.connectionRequests.get(requestId);
   }
 
@@ -271,5 +178,56 @@ export class OpenConvaiState implements IStateManager {
 
   clearConnectionRequests(): void {
     this.connectionRequests.clear();
+  }
+
+  /**
+   * Persists agent data to environment variables
+   * @param agent - The agent data to persist
+   * @param options - Environment file persistence options
+   */
+  async persistAgentData(
+    agent: RegisteredAgent,
+    options?: AgentPersistenceOptions
+  ): Promise<void> {
+    if (options?.type && options.type !== 'env-file') {
+      throw new Error(
+        `Unsupported persistence type: ${options.type}. Only 'env-file' is supported.`
+      );
+    }
+
+    const envFilePath =
+      (options as EnvFilePersistenceOptions)?.envFilePath ||
+      this.defaultEnvFilePath ||
+      process.env.ENV_FILE_PATH ||
+      '.env';
+
+    if (!envFilePath) {
+      throw new Error(
+        'Environment file path could not be determined for agent data persistence'
+      );
+    }
+
+    const prefix =
+      (options as EnvFilePersistenceOptions)?.prefix || this.defaultPrefix;
+
+    if (!agent.accountId || !agent.inboundTopicId || !agent.outboundTopicId) {
+      throw new Error('Agent data incomplete, cannot persist to environment');
+    }
+
+    const updates: Record<string, string> = {
+      [`${prefix}_ACCOUNT_ID`]: agent.accountId,
+      [`${prefix}_INBOUND_TOPIC_ID`]: agent.inboundTopicId,
+      [`${prefix}_OUTBOUND_TOPIC_ID`]: agent.outboundTopicId,
+    };
+
+    if (agent.privateKey) {
+      updates[`${prefix}_PRIVATE_KEY`] = agent.privateKey;
+    }
+
+    if (agent.profileTopicId) {
+      updates[`${prefix}_PROFILE_TOPIC_ID`] = agent.profileTopicId;
+    }
+
+    await updateEnvFile(envFilePath, updates);
   }
 }
