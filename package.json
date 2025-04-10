@@ -68,7 +68,7 @@
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.62.0",
-    "@hashgraphonline/standards-sdk": "0.0.69",
+    "@hashgraphonline/standards-sdk": "0.0.70",
     "@langchain/community": "^0.3.37",
     "@langchain/openai": "^0.5.1",
     "dotenv": "^16.4.1",

@@ -2,7 +2,7 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { IStateManager, ActiveConnection } from '../state/open-convai-state';
-import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
+import { Logger } from '@hashgraphonline/standards-sdk';
 
 export interface InitiateConnectionToolParams extends ToolParams {
   hcsClient: HCS10Client;
@@ -24,7 +24,7 @@ export class InitiateConnectionTool extends StructuredTool {
       .string()
       .describe(
         'The Hedera account ID (e.g., 0.0.12345) of the agent you want to connect with.'
-      ),
+      )
   });
 
   private hcsClient: HCS10Client;
@@ -43,7 +43,7 @@ export class InitiateConnectionTool extends StructuredTool {
   }
 
   protected async _call({
-    targetAccountId,
+    targetAccountId
   }: z.infer<this['schema']>): Promise<string> {
     const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
@@ -63,7 +63,6 @@ export class InitiateConnectionTool extends StructuredTool {
         return `Error: Could not retrieve profile or find inbound topic ID for target agent ${targetAccountId}. They might not be registered or have a public profile.`;
       }
       const targetInboundTopicId = targetProfile.topicInfo.inboundTopic;
-      const targetOutboundTopicId = targetProfile.topicInfo.outboundTopic;
       const targetAgentName =
         targetProfile.profile.name || `Agent ${targetAccountId}`;
 
@@ -91,6 +90,7 @@ export class InitiateConnectionTool extends StructuredTool {
       const confirmationTimeoutMs = 60000;
       const delayMs = 2000;
       const maxAttempts = Math.ceil(confirmationTimeoutMs / delayMs);
+
       const confirmationResult =
         await this.hcsClient.waitForConnectionConfirmation(
           targetInboundTopicId,
@@ -116,7 +116,6 @@ export class InitiateConnectionTool extends StructuredTool {
       };
       this.stateManager.addActiveConnection(newConnection);
 
-      // Find the newly added connection to get its implicit ID (index+1) for the return message
       const connections = this.stateManager.listConnections();
       const addedEntry = connections.find(
         (c) => c.connectionTopicId === connectionTopicId
@@ -126,10 +125,10 @@ export class InitiateConnectionTool extends StructuredTool {
         : null;
 
       const idString = localConnectionId ? `#${localConnectionId}` : '';
+
       return `Successfully established connection ${idString} with ${targetAgentName} (${targetAccountId}). Connection Topic: ${connectionTopicId}. You can now send messages using this connection.`;
     } catch (error) {
       this.logger.error(`Connection initiation failed: ${error}`);
-      // No state was added for pending connection, so no cleanup needed here
       return `Error initiating connection with ${targetAccountId}: ${
         error instanceof Error ? error.message : String(error)
       }`;

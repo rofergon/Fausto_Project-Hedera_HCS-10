@@ -6,3 +6,6 @@ export * from './InitiateConnectionTool';
 export * from './ListConnectionsTool';
 export * from './CheckMessagesTool';
 export * from './FindRegistrationsTool';
+export * from './ConnectionMonitorTool';
+export * from './ManageConnectionRequestsTool';
+export * from './AcceptConnectionRequestTool';

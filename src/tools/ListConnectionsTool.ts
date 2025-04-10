@@ -2,7 +2,14 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { IStateManager, ActiveConnection } from '../state/open-convai-state';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { HCSMessage } from '../hcs10/HCSMessage';
+import { HCSMessage } from '@hashgraphonline/standards-sdk';
+
+interface ExtendedConnection extends ActiveConnection {
+  connection_request_id?: number;
+  confirmed_request_id?: number;
+  requestor_outbound_topic_id?: string;
+  inbound_request_id?: number;
+}
 
 export interface ListConnectionsToolParams extends ToolParams {
   stateManager: IStateManager;
@@ -53,7 +60,6 @@ export class ListConnectionsTool extends StructuredTool {
       return 'There are currently no active connections.';
     }
 
-    // Filter based on the FINAL state connections returned after enhancement
     const activeConnections = finalStateConnections.filter(
       (c) => !c.isPending && !c.needsConfirmation
     );
@@ -112,7 +118,7 @@ export class ListConnectionsTool extends StructuredTool {
     } else if (conn.status === 'established') {
       statusText = 'established';
     } else if (conn.status) {
-      statusText = conn.status; // Fallback
+      statusText = conn.status;
     }
     output += `   Status: ${statusText}\n`;
 
@@ -141,15 +147,16 @@ export class ListConnectionsTool extends StructuredTool {
   private async enhanceConnectionInfo(
     connections: ActiveConnection[]
   ): Promise<ActiveConnection[]> {
-    const finalConnections = new Map<string, ActiveConnection>();
+    const finalConnections = new Map<string, ExtendedConnection>();
     const profileMap = new Map<string, any>();
     const targetAccountIds = new Set<string>();
+    const requestTargetMap = new Map<number, string>();
+    const activeAccountId = this.hcsClient?.getAccountAndSigner().accountId;
 
     for (const conn of connections) {
       if (conn.targetAccountId) {
         targetAccountIds.add(conn.targetAccountId);
       }
-      // Add connection from state, assume established unless updated later
       finalConnections.set(conn.connectionTopicId, {
         ...conn,
         status: 'established',
@@ -174,7 +181,7 @@ export class ListConnectionsTool extends StructuredTool {
           .catch((_err) => ({ messages: [] })),
       ]);
     } catch (e) {
-      // Silently ignore errors fetching initial messages
+      /* empty */
     }
 
     const inboundMessages = inboundMessagesResult.messages;
@@ -236,18 +243,11 @@ export class ListConnectionsTool extends StructuredTool {
             profileMap.set(accountId, profileResult.profile);
           }
         } catch (e) {
-          // Silently ignore profile fetch errors
+          /* empty */
         }
       }
     );
     await Promise.allSettled(profileFetchPromises);
-
-    let activeAccountId: string | undefined;
-    try {
-      activeAccountId = this.hcsClient.getOperatorId();
-    } catch (e) {
-      // Silently ignore if we can't get the active ID
-    }
 
     const getProfileInfo = (accountId?: string) => {
       if (!accountId) {
@@ -267,21 +267,17 @@ export class ListConnectionsTool extends StructuredTool {
       };
     };
 
-    const requestTargetMap = new Map<number, string>();
-
-    // First pass: Identify target for each request
-    for (const [reqId, request] of outboundRequestMap.entries()) {
+    for (const [reqId, request] of Array.from(outboundRequestMap.entries())) {
       let targetAccountIdForReq: string | undefined;
       try {
-        if (request.payload) {
-          const payloadData = JSON.parse(request.payload);
+        if ((request as any).payload) {
+          const payloadData = JSON.parse((request as any).payload);
           targetAccountIdForReq = payloadData.target_account_id;
         }
       } catch {
-        /* Ignore */
+        /* empty */
       }
 
-      // If payload didn't provide it, try operator_id
       if (!targetAccountIdForReq || typeof targetAccountIdForReq !== 'string') {
         if (request.operator_id) {
           targetAccountIdForReq =
@@ -296,8 +292,7 @@ export class ListConnectionsTool extends StructuredTool {
       }
     }
 
-    // Second pass: Process confirmations and statuses
-    for (const [reqId, request] of outboundRequestMap.entries()) {
+    for (const [reqId, request] of Array.from(outboundRequestMap.entries())) {
       const originalSenderAccountId =
         this.hcsClient.standardClient.extractAccountFromOperatorId(
           request.operator_id || ''
@@ -309,7 +304,6 @@ export class ListConnectionsTool extends StructuredTool {
 
       const outboundConfirmation = outboundConfirmationMap.get(reqId);
 
-      // 1. Check Local Confirmation First
       if (outboundConfirmation?.connection_topic_id) {
         const connectionTopicId = outboundConfirmation.connection_topic_id;
         const correctTargetAccountId = requestTargetMap.get(reqId);
@@ -322,20 +316,23 @@ export class ListConnectionsTool extends StructuredTool {
           !finalConnections.has(connectionTopicId) ||
           finalConnections.get(connectionTopicId)?.isPending
         ) {
-          finalConnections.set(connectionTopicId, {
+          const newConnection: ExtendedConnection = {
             connectionTopicId,
-            targetAccountId: correctTargetAccountId,
+            targetAccountId: correctTargetAccountId || 'unknown',
             targetAgentName: correctTargetAgentName,
+            targetInboundTopicId: '',
             status: 'established',
             isPending: false,
             needsConfirmation: false,
-            created: new Date(outboundConfirmation.created || request.created!),
+            created: new Date(outboundConfirmation.created || new Date()),
             profileInfo: correctTargetProfileInfo,
             connection_request_id: reqId,
             confirmed_request_id: outboundConfirmation.confirmed_request_id,
-            requestor_outbound_topic_id:
-              outboundConfirmation.requestor_outbound_topic_id,
-          });
+          };
+          if (outboundConfirmation.outbound_topic_id) {
+            newConnection.requestor_outbound_topic_id = outboundConfirmation.outbound_topic_id;
+          }
+          finalConnections.set(connectionTopicId, newConnection);
         }
         const pendingKey = `pending_${reqId}`;
         if (finalConnections.has(pendingKey)) {
@@ -344,13 +341,12 @@ export class ListConnectionsTool extends StructuredTool {
         continue;
       }
 
-      // 2. If No Local Confirmation, Check Target's Topic
       let correctTargetInboundTopicId: string | undefined = undefined;
       let identifiedTargetAccountId: string | undefined = undefined;
 
       try {
-        if (request.payload) {
-          const payloadData = JSON.parse(request.payload);
+        if ((request as any).payload) {
+          const payloadData = JSON.parse((request as any).payload);
           identifiedTargetAccountId = payloadData.target_account_id;
         }
         if (
@@ -376,7 +372,7 @@ export class ListConnectionsTool extends StructuredTool {
                 profileMap.set(identifiedTargetAccountId, targetProfile);
               }
             } catch (profileError) {
-              // Silently ignore profile fetch error
+              /* empty */
             }
           }
           if (targetProfile?.inboundTopicId) {
@@ -384,10 +380,9 @@ export class ListConnectionsTool extends StructuredTool {
           }
         }
       } catch (error) {
-        // Silently ignore payload parsing or fallback errors
+        /* empty */
       }
 
-      // Step 2d: Fetch messages using the determined topic ID (WITH RETRIES)
       let targetConfirmation: HCSMessage | undefined = undefined;
       const MAX_FETCH_ATTEMPTS = 3;
       const FETCH_DELAY_MS = 500;
@@ -404,17 +399,14 @@ export class ListConnectionsTool extends StructuredTool {
                 msg.op === 'connection_created' && msg.connection_id === reqId
             );
             if (targetConfirmation) {
-              break; // Found confirmation, exit retry loop
+              break;
             } else if (attempt === MAX_FETCH_ATTEMPTS) {
-              // If found nothing after max attempts, break normally
               break;
             }
           } catch (targetFetchError) {
             if (attempt === MAX_FETCH_ATTEMPTS) {
-              // Error on last attempt, break loop
               break;
             } else {
-              // Wait before retrying
               await new Promise((resolve) =>
                 setTimeout(resolve, FETCH_DELAY_MS)
               );
@@ -423,7 +415,6 @@ export class ListConnectionsTool extends StructuredTool {
         }
       }
 
-      // 3. Process based on whether Target Confirmation was Found
       if (targetConfirmation?.connection_topic_id) {
         const connectionTopicId = targetConfirmation.connection_topic_id;
         const pendingKey = `pending_${reqId}`;
@@ -438,17 +429,19 @@ export class ListConnectionsTool extends StructuredTool {
           !finalConnections.has(connectionTopicId) ||
           finalConnections.get(connectionTopicId)?.isPending
         ) {
-          finalConnections.set(connectionTopicId, {
+          const newConnection: ExtendedConnection = {
             connectionTopicId,
-            targetAccountId: identifiedTargetAccountId,
+            targetAccountId: identifiedTargetAccountId || 'unknown',
             targetAgentName: correctTargetAgentName,
+            targetInboundTopicId: correctTargetInboundTopicId || '',
             status: 'established',
             isPending: false,
             needsConfirmation: false,
-            created: new Date(targetConfirmation.created || request.created!),
+            created: new Date(targetConfirmation.created || new Date()),
             profileInfo: correctTargetProfileInfo,
             connection_request_id: reqId,
-          });
+          };
+          finalConnections.set(connectionTopicId, newConnection);
         }
         if (finalConnections.has(pendingKey)) {
           finalConnections.delete(pendingKey);
@@ -456,27 +449,31 @@ export class ListConnectionsTool extends StructuredTool {
       } else {
         const pendingKey = `pending_${reqId}`;
         const alreadyEstablished = Array.from(finalConnections.values()).some(
-          (c) => c.connection_request_id === reqId && c.status === 'established'
+          (c) => {
+            const extConn = c as ExtendedConnection;
+            return extConn.connection_request_id === reqId && c.status === 'established';
+          }
         );
 
         if (!alreadyEstablished && !finalConnections.has(pendingKey)) {
-          finalConnections.set(pendingKey, {
+          const newConnection: ExtendedConnection = {
             connectionTopicId: pendingKey,
-            targetAccountId: originalSenderAccountId,
+            targetAccountId: originalSenderAccountId || 'unknown',
             targetAgentName: originalSenderAgentName,
+            targetInboundTopicId: '',
             status: 'pending',
             isPending: true,
             needsConfirmation: false,
-            created: new Date(request.created!),
+            created: new Date(request.created || new Date()),
             profileInfo: originalSenderProfileInfo,
             connection_request_id: reqId,
-          });
+          };
+          finalConnections.set(pendingKey, newConnection);
         }
       }
     }
 
-    // Process Inbound Requests (Sent to Us)
-    for (const [reqSeqNum, request] of inboundRequestMap.entries()) {
+    for (const [reqSeqNum, request] of Array.from(inboundRequestMap.entries())) {
       const requestorAccountId =
         this.hcsClient.standardClient.extractAccountFromOperatorId(
           request.operator_id || ''
@@ -495,38 +492,40 @@ export class ListConnectionsTool extends StructuredTool {
             (c.status === 'established' || c.isPending)
         );
         if (!alreadyExists && !finalConnections.has(needsConfirmKey)) {
-          finalConnections.set(needsConfirmKey, {
+          const newConnection: ExtendedConnection = {
             connectionTopicId: needsConfirmKey,
-            targetAccountId: requestorAccountId,
+            targetAccountId: requestorAccountId || 'unknown',
             targetAgentName: requestorAgentName,
+            targetInboundTopicId: '',
             status: 'needs confirmation',
             isPending: false,
             needsConfirmation: true,
-            created: new Date(request.created!),
+            created: new Date(request.created || new Date()),
             profileInfo: profileInfo,
             inbound_request_id: reqSeqNum,
-          });
+          };
+          finalConnections.set(needsConfirmKey, newConnection);
         }
       } else {
-        const confirmedTopicId = inboundConfirmation.connection_topic_id!;
+        const confirmedTopicId = inboundConfirmation.connection_topic_id || '';
         if (!finalConnections.has(confirmedTopicId)) {
-          // If locally confirmed but somehow missing, add it.
-          finalConnections.set(confirmedTopicId, {
+          const newConnection: ExtendedConnection = {
             connectionTopicId: confirmedTopicId,
-            targetAccountId: requestorAccountId,
+            targetAccountId: requestorAccountId || 'unknown',
             targetAgentName: requestorAgentName,
+            targetInboundTopicId: '',
             status: 'established',
             isPending: false,
             needsConfirmation: false,
-            created: new Date(inboundConfirmation.created || request.created!),
+            created: new Date(inboundConfirmation.created || request.created || new Date()),
             profileInfo: profileInfo,
             inbound_request_id: reqSeqNum,
-          });
+          };
+          finalConnections.set(confirmedTopicId, newConnection);
         }
       }
     }
 
-    // Fetch Last Activity for Established Connections
     const activityFetchPromises = Array.from(finalConnections.values())
       .filter(
         (c) =>
@@ -553,18 +552,15 @@ export class ListConnectionsTool extends StructuredTool {
             }
           }
         } catch (activityError) {
-          // Silently ignore activity fetch errors
+          /* empty */
         }
       });
     await Promise.allSettled(activityFetchPromises);
 
-    // --- UPDATE SHARED STATE ---
-    for (const connection of finalConnections.values()) {
+    for (const connection of Array.from(finalConnections.values())) {
       this.stateManager.updateOrAddConnection(connection);
     }
-    // ---------------------------
 
-    // Return a fresh list from the *updated* state manager
     const updatedStateConnections = this.stateManager.listConnections();
     return updatedStateConnections;
   }

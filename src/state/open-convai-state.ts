@@ -19,6 +19,15 @@ export interface AgentProfileInfo {
   type?: string;
 }
 
+export interface ConnectionRequestInfo {
+  id: number;
+  requestorId: string;
+  requestorName: string;
+  timestamp: Date;
+  memo?: string;
+  profile?: AgentProfileInfo;
+}
+
 export interface ActiveConnection {
   targetAccountId: string;
   targetAgentName: string;
@@ -81,6 +90,31 @@ export interface IStateManager {
    * Updates the last processed message timestamp for a connection.
    */
   updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
+
+  /**
+   * Stores a connection request in the state.
+   */
+  addConnectionRequest(request: ConnectionRequestInfo): void;
+
+  /**
+   * Lists all pending connection requests.
+   */
+  listConnectionRequests(): ConnectionRequestInfo[];
+
+  /**
+   * Finds a connection request by its ID.
+   */
+  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined;
+
+  /**
+   * Removes a connection request from the state.
+   */
+  removeConnectionRequest(requestId: number): void;
+
+  /**
+   * Clears all connection requests from the state.
+   */
+  clearConnectionRequests(): void;
 }
 
 /**
@@ -92,6 +126,7 @@ export class OpenConvaiState implements IStateManager {
   private currentAgent: RegisteredAgent | null = null;
   private activeConnections: ActiveConnection[] = [];
   private connectionMessageTimestamps: Record<string, number> = {};
+  private connectionRequests: Map<number, ConnectionRequestInfo> = new Map();
 
   /**
    * Sets the current active agent and clears any previous connection data.
@@ -101,6 +136,7 @@ export class OpenConvaiState implements IStateManager {
     this.currentAgent = agent;
     this.activeConnections = [];
     this.connectionMessageTimestamps = {};
+    this.connectionRequests.clear();
   }
 
   /**
@@ -215,5 +251,25 @@ export class OpenConvaiState implements IStateManager {
       this.connectionMessageTimestamps[connectionTopicId] =
         Date.now() * 1_000_000;
     }
+  }
+
+  addConnectionRequest(request: ConnectionRequestInfo): void {
+    this.connectionRequests.set(request.id, { ...request });
+  }
+
+  listConnectionRequests(): ConnectionRequestInfo[] {
+    return Array.from(this.connectionRequests.values());
+  }
+
+  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined {
+    return this.connectionRequests.get(requestId);
+  }
+
+  removeConnectionRequest(requestId: number): void {
+    this.connectionRequests.delete(requestId);
+  }
+
+  clearConnectionRequests(): void {
+    this.connectionRequests.clear();
   }
 }

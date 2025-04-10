@@ -1,22 +1,18 @@
-// src/hcs10/HCS10Client.ts
-
 import {
   TransactionReceipt,
-  PrivateKey, // Import PrivateKey if needed for submitKey parameter
+  PrivateKey,
 } from '@hashgraph/sdk';
-// Import necessary components directly using named imports
 import {
-  HCS10Client as StandardSDKClient, // Alias to avoid name clash with our wrapper
+  HCS10Client as StandardSDKClient,
   AgentBuilder,
   InboundTopicType as StandardInboundTopicType,
   AIAgentCapability as StandardAIAgentCapability,
   AgentRegistrationResult,
   WaitForConnectionConfirmationResponse,
-  ProfileResponse as SDKProfileResponse, // Alias to avoid potential future clashes
+  ProfileResponse as SDKProfileResponse,
   HCSMessage,
   LogLevel,
 } from '@hashgraphonline/standards-sdk';
-
 import { AgentMetadata, AgentChannels } from './types';
 import { encryptMessage } from '../utils/Encryption';
 
@@ -26,22 +22,18 @@ export interface HCSMessageWithTimestamp extends HCSMessage {
   sequence_number: number;
 }
 
-// Add pfp details to AgentMetadata type definition
 export interface ExtendedAgentMetadata extends AgentMetadata {
   pfpBuffer?: Buffer;
   pfpFileName?: string;
 }
 
-// Define types using the imported aliases or direct types if no clash
 type StandardHandleConnectionRequest = InstanceType<
   typeof StandardSDKClient
 >['handleConnectionRequest'];
-// Infer FeeConfigBuilderInterface and HandleConnectionRequestResponse using Parameters/Awaited utility types
 type FeeConfigBuilderInterface = Parameters<StandardHandleConnectionRequest>[3];
 type HandleConnectionRequestResponse = Awaited<
   ReturnType<StandardHandleConnectionRequest>
 >;
-// Define AND EXPORT the stricter NetworkType expected by the standard SDK
 export type StandardNetworkType = 'mainnet' | 'testnet';
 
 /**
@@ -51,19 +43,14 @@ export type StandardNetworkType = 'mainnet' | 'testnet';
  * - Sends messages on Hedera topics (currently manual, potential for standard SDK integration).
  */
 export class HCS10Client {
-  // Use the standard SDK's client type via alias
   public standardClient: StandardSDKClient;
   private useEncryption: boolean;
-
-  // Note: AgentChannels might become redundant if standardClient manages them internally
   public agentChannels?: AgentChannels;
   public guardedRegistryBaseUrl: string;
 
-  // Updated constructor to take operator details directly
   constructor(
     operatorId: string,
     operatorPrivateKey: string,
-    // Restrict network type to what the standard SDK expects
     network: StandardNetworkType,
     options?: {
       useEncryption?: boolean;
@@ -71,22 +58,17 @@ export class HCS10Client {
       logLevel?: LogLevel;
     }
   ) {
-    // Instantiate the standard SDK client using the imported class
-    // The passed 'network' now matches the expected type
     this.standardClient = new StandardSDKClient({
       network: network,
       operatorId: operatorId,
       operatorPrivateKey: operatorPrivateKey,
       guardedRegistryBaseUrl: options?.registryUrl,
       logLevel: options?.logLevel,
-      // Add other necessary config options based on StandardSDKClient constructor if needed
     });
     this.guardedRegistryBaseUrl = options?.registryUrl || '';
     this.useEncryption = options?.useEncryption || false;
-    this.operatorPrivateKey = operatorPrivateKey;
   }
 
-  // Add public getter for operatorId
   public getOperatorId(): string {
     const operator = this.standardClient.getClient().operatorAccountId;
     if (!operator) {
@@ -95,21 +77,16 @@ export class HCS10Client {
     return operator.toString();
   }
 
-  // Add public getter for network
   public getNetwork(): StandardNetworkType {
-    // Ensure return type matches
-    // Assuming standardClient.getNetwork() returns 'mainnet' or 'testnet'
     return this.standardClient.getNetwork() as StandardNetworkType;
   }
 
-  // Expose handleConnectionRequest from the standard client
   public async handleConnectionRequest(
     inboundTopicId: string,
     requestingAccountId: string,
     connectionRequestId: number,
-    feeConfig?: FeeConfigBuilderInterface // Use inferred type
+    feeConfig?: FeeConfigBuilderInterface
   ): Promise<HandleConnectionRequestResponse> {
-    // Use inferred type
     try {
       const result = await this.standardClient.handleConnectionRequest(
         inboundTopicId,
@@ -145,30 +122,21 @@ export class HCS10Client {
     inboundTopicId: string,
     memo: string
   ): Promise<TransactionReceipt> {
-    // Return type might need adjustment based on actual SDK method
-    // Note: The standard SDK submitConnectionRequest might return void or something else.
-    // Adjusting based on the reference code which seems to expect a receipt.
-    // This might require calling standardClient.submitPayload directly if submitConnectionRequest isn't structured this way.
-
-    // Assuming standardClient has a submitConnectionRequest that returns a receipt or similar.
-    // If not, this needs refactoring to build the payload and use submitPayload.
-    // Let's *assume* for now it exists and returns a receipt for the first message submission.
     return this.standardClient.submitConnectionRequest(
       inboundTopicId,
       memo
-    ) as any; // Type cast to resolve SDK version conflicts
+    ) as any;
   }
 
   /**
    * Exposes the standard SDK's waitForConnectionConfirmation method.
    */
   public async waitForConnectionConfirmation(
-    outboundTopicId: string, // Changed from inboundTopicId based on demo usage
+    outboundTopicId: string,
     connectionRequestId: number,
     maxAttempts = 60,
     delayMs = 2000
   ): Promise<WaitForConnectionConfirmationResponse> {
-    // Use 'any' or infer if possible
     return this.standardClient.waitForConnectionConfirmation(
       outboundTopicId,
       connectionRequestId,
@@ -186,24 +154,22 @@ export class HCS10Client {
   public async createAndRegisterAgent(
     metadata: ExtendedAgentMetadata
   ): Promise<AgentRegistrationResult> {
-    // Use components via the imported classes/enums
     const builder = new AgentBuilder();
 
-    // Configure the agent builder with metadata
     builder
       .setName(metadata.name)
       .setDescription(metadata.description || '')
       .setCapabilities(
-        metadata.capabilities ? metadata.capabilities : [StandardAIAgentCapability.TEXT_GENERATION]
+        metadata.capabilities
+          ? metadata.capabilities
+          : [StandardAIAgentCapability.TEXT_GENERATION]
       )
       .setAgentType((metadata.type || 'autonomous') as 'autonomous' | 'manual')
       .setModel(metadata.model || 'agent-model-2024')
       .setNetwork(this.getNetwork())
-      .setInboundTopicType(StandardInboundTopicType.PUBLIC); // Use imported enum
+      .setInboundTopicType(StandardInboundTopicType.PUBLIC);
 
-    // Set Profile Picture if provided
     if (metadata.pfpBuffer && metadata.pfpFileName) {
-      // Check buffer size - AgentBuilder might have limits, though SDK handles inscription chunking
       if (metadata.pfpBuffer.byteLength === 0) {
         console.warn('Provided PFP buffer is empty. Skipping profile picture.');
       } else {
@@ -213,26 +179,17 @@ export class HCS10Client {
         builder.setProfilePicture(metadata.pfpBuffer, metadata.pfpFileName);
       }
     } else {
-      // StandardAgentBuilder requires a PFP. We need a fallback or error handling.
-      // Option 1: Throw error
-      // throw new Error("Profile picture (pfpBuffer and pfpFileName) is required for agent creation.");
-      // Option 2: Use a default placeholder (requires creating a default buffer/filename)
       console.warn(
         'Profile picture not provided in metadata. Agent creation might fail if required by the underlying SDK builder.'
       );
-      // If the SDK *strictly* requires it, we MUST provide something or throw.
-      // Let's assume for now the SDK might handle a missing PFP gracefully or we accept potential failure.
-      // For a robust solution, generating a default placeholder image might be best.
     }
 
-    // Add social links if available
     if (metadata.social) {
       Object.entries(metadata.social).forEach(([platform, handle]) => {
         builder.addSocial(platform as any, handle);
       });
     }
 
-    // Add properties if available
     if (metadata.properties) {
       Object.entries(metadata.properties).forEach(([key, value]) => {
         builder.addProperty(key, value);
@@ -276,20 +233,18 @@ export class HCS10Client {
     topicId: string,
     data: string,
     memo?: string,
-    submitKey?: PrivateKey // Use imported PrivateKey type
+    submitKey?: PrivateKey
   ): Promise<number | undefined> {
-    // Encrypt the final payload string if needed
     if (this.useEncryption) {
       data = encryptMessage(data);
     }
 
     try {
-      // Use the standard client's submitMessage which handles fees etc.
       const messageResponse = await this.standardClient.sendMessage(
         topicId,
         data,
         memo,
-        submitKey as any // Type cast to avoid SDK version conflicts
+        submitKey as any
       );
       return messageResponse.topicSequenceNumber?.toNumber();
     } catch (error) {
@@ -320,8 +275,8 @@ export class HCS10Client {
         return {
           ...sdkMessage,
           timestamp: timestamp,
-          data: sdkMessage.data, // Assume data is directly usable or needs decoding based on standardClient
-          sequence_number: sdkMessage.sequence_number, // Ensure sequence number is included
+          data: sdkMessage.data,
+          sequence_number: sdkMessage.sequence_number,
         };
       });
       mappedMessages.sort(
@@ -347,7 +302,6 @@ export class HCS10Client {
    * @returns The resolved message content.
    */
   public async getMessageContent(inscriptionIdOrData: string): Promise<string> {
-    // ... (implementation remains the same, uses this.standardClient)
     try {
       const content = await this.standardClient.getMessageContent(
         inscriptionIdOrData
@@ -394,8 +348,7 @@ export class HCS10Client {
         `[HCS10Client] Error fetching operator's inbound topic ID (${this.getOperatorId()}):`,
         error
       );
-      // Construct a more user-friendly error message
-      const operatorId = this.getOperatorId(); // Get operator ID again for the message
+      const operatorId = this.getOperatorId();
       let detailedMessage = `Failed to get inbound topic ID for operator ${operatorId}.`;
       if (
         error instanceof Error &&
@@ -407,7 +360,6 @@ export class HCS10Client {
       } else {
         detailedMessage += ` Unexpected error: ${String(error)}`;
       }
-      // Rethrow with the improved message
       throw new Error(detailedMessage);
     }
   }
@@ -417,7 +369,11 @@ export class HCS10Client {
    * Required by tools needing to identify the current agent instance.
    */
   public getAccountAndSigner(): { accountId: string; signer: PrivateKey } {
-      return this.standardClient.getAccountAndSigner();
+    const result = this.standardClient.getAccountAndSigner();
+    return {
+      accountId: result.accountId,
+      signer: result.signer as unknown as PrivateKey,
+    };
   }
 
   /**
@@ -427,14 +383,15 @@ export class HCS10Client {
    * @throws If the outbound topic cannot be determined.
    */
   public async getOutboundTopicId(): Promise<string> {
-      const operatorId = this.getOperatorId();
-      // Use the getAgentProfile method we just added
-      const profile = await this.getAgentProfile(operatorId);
-      if (profile.success && profile.topicInfo?.outboundTopic) {
-          return profile.topicInfo.outboundTopic;
-      } else {
-          throw new Error(`Could not retrieve outbound topic from profile for ${operatorId}. Profile success: ${profile.success}, Error: ${profile.error}`);
-      }
+    const operatorId = this.getOperatorId();
+    const profile = await this.getAgentProfile(operatorId);
+    if (profile.success && profile.topicInfo?.outboundTopic) {
+      return profile.topicInfo.outboundTopic;
+    } else {
+      throw new Error(
+        `Could not retrieve outbound topic from profile for ${operatorId}. Profile success: ${profile.success}, Error: ${profile.error}`
+      );
+    }
   }
 
   public setClient(accountId: string, privateKey: string): StandardSDKClient {

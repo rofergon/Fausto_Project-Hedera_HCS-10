@@ -2,10 +2,13 @@ import * as dotenv from 'dotenv';
 import { initializeHCS10Client } from '../src/index';
 import { HCS10Client, ExtendedAgentMetadata } from '../src/hcs10/HCS10Client';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
+import { ConnectionMonitorTool } from '../src/tools/ConnectionMonitorTool';
 import { ListConnectionsTool } from '../src/tools/ListConnectionsTool';
 import { InitiateConnectionTool } from '../src/tools/InitiateConnectionTool';
 import { SendMessageToConnectionTool } from '../src/tools/SendMessageToConnectionTool';
 import { CheckMessagesTool } from '../src/tools/CheckMessagesTool';
+import { ManageConnectionRequestsTool } from '../src/tools/ManageConnectionRequestsTool';
+import { AcceptConnectionRequestTool } from '../src/tools/AcceptConnectionRequestTool';
 import { OpenConvaiState } from '../src/state/open-convai-state';
 import readline from 'readline';
 import * as fs from 'fs';
@@ -39,7 +42,8 @@ interface ActiveConnection {
 }
 
 let hcsClient: HCS10Client;
-let connectionTool: ConnectionTool; // Keep this global since it manages state for monitoring
+let connectionTool: ConnectionTool; // For backward compatibility
+let connectionMonitorTool: ConnectionMonitorTool; // Our new tool
 let currentAgent: RegisteredAgent | null = null;
 const registeredAgents: RegisteredAgent[] = [];
 let stateManager: OpenConvaiState;
@@ -275,6 +279,13 @@ async function registerNewAgent() {
       );
     }
 
+    // Recreate the connection tool with the agent's client
+    connectionTool = new ConnectionTool({
+      client: hcsClient,
+      stateManager: stateManager,
+    });
+    console.log('Connection tool reconfigured for active agent');
+
     // Update the state manager with the current agent
     stateManager.setCurrentAgent(currentAgent);
   } catch (error) {
@@ -322,6 +333,19 @@ async function selectActiveAgent() {
     connectionTool.stopMonitoring();
     isMonitoring = false;
   }
+
+  // Reconfigure client for the selected agent
+  hcsClient = new HCS10Client(
+    currentAgent.accountId,
+    currentAgent.operatorPrivateKey,
+    hcsClient.getNetwork(),
+    {
+      useEncryption: false,
+      registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+    }
+  );
+  console.log(`Client reconfigured for active agent: ${currentAgent.name}`);
+
   // Reset active connections when switching agents
   stateManager.setCurrentAgent(currentAgent);
   console.log('Active connections cleared for the new agent.');
@@ -348,12 +372,16 @@ async function startMonitoringConnections() {
   }
 
   try {
-    // Use the connection tool's internal method to start monitoring
-    const result = await connectionTool._call({
-      inboundTopicId: currentAgent.inboundTopicId,
+    // Use the ConnectionMonitorTool to start monitoring
+    const result = await connectionMonitorTool.call({
+      acceptAll: true,
+      monitorDurationSeconds: 60,
     });
     console.log(result);
-    if (result.startsWith('Started monitoring')) {
+    if (
+      result.includes('Monitored for') ||
+      result.includes('Started monitoring')
+    ) {
       isMonitoring = true;
     }
   } catch (error) {
@@ -374,7 +402,10 @@ async function stopMonitoringConnections() {
   }
 
   try {
-    connectionTool.stopMonitoring();
+    // For backward compatibility, still stop the connectionTool if it's running
+    if (connectionTool) {
+      connectionTool.stopMonitoring();
+    }
     isMonitoring = false;
     console.log('Connection monitoring stopped.');
   } catch (error) {
@@ -404,24 +435,44 @@ async function initiateConnection() {
     return;
   }
 
-  if (stateManager.listConnections().some((c) => c.targetAccountId === targetAccountId && !c.isPending && !c.needsConfirmation)) {
-    console.log(`Already have an established connection with ${targetAccountId}.`);
+  if (
+    stateManager
+      .listConnections()
+      .some(
+        (c) =>
+          c.targetAccountId === targetAccountId &&
+          !c.isPending &&
+          !c.needsConfirmation
+      )
+  ) {
+    console.log(
+      `Already have an established connection with ${targetAccountId}.`
+    );
     return;
   }
 
   try {
-    console.log(`
-Initiating connection to ${targetAccountId}...`);
+    console.log(`Initiating connection to ${targetAccountId}...`);
 
-    // Create the InitiateConnectionTool on demand with current hcsClient
-    const initiateConnectionTool = new InitiateConnectionTool({ 
-      hcsClient, 
-      stateManager 
+    const initiateConnectionTool = new InitiateConnectionTool({
+      hcsClient,
+      stateManager,
     });
-    const result = await initiateConnectionTool._call({ targetAccountId });
 
-    console.log(result);
+    const configureFees = await question(
+      'Configure fees for this connection? (y/n): '
+    );
 
+    if (configureFees.toLowerCase() === 'y') {
+      console.log(
+        'Note: Fee configuration is not supported by the InitiateConnectionTool in this implementation.'
+      );
+      const result = await initiateConnectionTool.call({ targetAccountId });
+      console.log(result);
+    } else {
+      const result = await initiateConnectionTool.call({ targetAccountId });
+      console.log(result);
+    }
   } catch (error) {
     console.error(
       '\nUnexpected error during connection initiation:',
@@ -438,26 +489,178 @@ async function listActiveConnections() {
   }
 
   try {
-    console.log(`Fetching connections for ${currentAgent.name} (${currentAgent.accountId})...`);
+    console.log(
+      `Fetching connections for ${currentAgent.name} (${currentAgent.accountId})...`
+    );
 
     if (!stateManager) {
-        console.error('State manager is not initialized!');
-        return;
+      console.error('State manager is not initialized!');
+      return;
     }
-    
+
     // Create the ListConnectionsTool on demand with current hcsClient
     const listTool = new ListConnectionsTool({ stateManager, hcsClient });
 
-    const connectionListOutput = await listTool._call({
+    const connectionListOutput = await listTool.call({
       includeDetails: true,
       showPending: true,
     });
 
     console.log(connectionListOutput);
-
   } catch (error) {
-    console.error('\\nError listing connections using ListConnectionsTool:', error);
+    console.error(
+      '\\nError listing connections using ListConnectionsTool:',
+      error
+    );
   }
+}
+
+async function manageConnectionRequests() {
+  displayHeader('Manage Connection Requests');
+  if (!currentAgent) {
+    console.log('No active agent selected.');
+    return;
+  }
+
+  const manageTool = new ManageConnectionRequestsTool({
+    hcsClient,
+    stateManager,
+  });
+
+  const acceptTool = new AcceptConnectionRequestTool({
+    hcsClient,
+    stateManager,
+  });
+
+  console.log('Connection Request Management Options:');
+  console.log('  1. List Pending Requests');
+  console.log('  2. View Request Details');
+  console.log('  3. Accept Request');
+  console.log('  4. Reject Request');
+  console.log('  0. Back to Main Menu');
+
+  const choice = await question('Enter your choice: ');
+
+  // Variables needed for request management
+  let viewRequestId,
+    acceptRequestId,
+    rejectRequestId,
+    reqId,
+    configureFees,
+    hbarFeeStr,
+    exemptAccountsInput;
+  let hbarFee, exemptIds;
+
+  switch (choice.trim()) {
+    case '1':
+      try {
+        const result = await manageTool.call({ action: 'list' });
+        console.log(result);
+      } catch (error) {
+        console.error('\nError listing requests:', error);
+      }
+      break;
+
+    case '2':
+      viewRequestId = await question('Enter request ID to view: ');
+      try {
+        reqId = parseInt(viewRequestId.trim());
+        if (isNaN(reqId)) {
+          console.log('Invalid request ID format.');
+          break;
+        }
+        const result = await manageTool.call({
+          action: 'view',
+          requestId: reqId,
+        });
+        console.log(result);
+      } catch (error) {
+        console.error('\nError viewing request:', error);
+      }
+      break;
+
+    case '3':
+      acceptRequestId = await question('Enter request ID to accept: ');
+      try {
+        reqId = parseInt(acceptRequestId.trim());
+        if (isNaN(reqId)) {
+          console.log('Invalid request ID format.');
+          break;
+        }
+
+        configureFees = await question(
+          'Configure fees for this connection? (y/n): '
+        );
+
+        if (configureFees.toLowerCase() === 'y') {
+          hbarFeeStr = await question('HBAR fee amount (e.g., 0.5): ');
+          exemptAccountsInput = await question(
+            'Exempt account IDs (comma-separated, leave blank for none): '
+          );
+
+          if (hbarFeeStr.trim()) {
+            hbarFee = parseFloat(hbarFeeStr);
+            if (isNaN(hbarFee) || hbarFee < 0) {
+              console.log('Invalid HBAR fee amount. Fee will not be set.');
+              hbarFee = undefined;
+            }
+          }
+
+          if (exemptAccountsInput.trim()) {
+            exemptIds = exemptAccountsInput
+              .split(',')
+              .map((id) => id.trim())
+              .filter((id) => /^\d+\.\d+\.\d+$/.test(id));
+            if (exemptIds.length === 0) {
+              console.log('No valid exempt account IDs provided.');
+              exemptIds = undefined;
+            }
+          }
+
+          const result = await acceptTool.call({
+            requestId: reqId,
+            hbarFee,
+            exemptAccountIds: exemptIds,
+          });
+          console.log(result);
+        } else {
+          const result = await acceptTool.call({
+            requestId: reqId,
+          });
+          console.log(result);
+        }
+      } catch (error) {
+        console.error('\nError accepting request:', error);
+      }
+      break;
+
+    case '4':
+      rejectRequestId = await question('Enter request ID to reject: ');
+      try {
+        reqId = parseInt(rejectRequestId.trim());
+        if (isNaN(reqId)) {
+          console.log('Invalid request ID format.');
+          break;
+        }
+        const result = await manageTool.call({
+          action: 'reject',
+          requestId: reqId,
+        });
+        console.log(result);
+      } catch (error) {
+        console.error('\nError rejecting request:', error);
+      }
+      break;
+
+    case '0':
+      return;
+
+    default:
+      console.log('Invalid choice.');
+      break;
+  }
+
+  await manageConnectionRequests();
 }
 
 // --- Messaging Actions ---
@@ -475,9 +678,9 @@ async function selectConnection(
   try {
     // Create the ListConnectionsTool on demand with current hcsClient
     const listTool = new ListConnectionsTool({ stateManager, hcsClient });
-    await listTool._call({
+    await listTool.call({
       includeDetails: false,
-      showPending: true
+      showPending: true,
     });
   } catch (error) {
     console.error('Error refreshing connections:', error);
@@ -486,7 +689,9 @@ async function selectConnection(
 
   // Now get the updated list from state manager
   const currentConnections = stateManager.listConnections();
-  console.log(`Found ${currentConnections.length} connections in state manager.`);
+  console.log(
+    `Found ${currentConnections.length} connections in state manager.`
+  );
 
   if (currentConnections.length === 0) {
     console.log('No active connections available.');
@@ -546,15 +751,13 @@ async function sendMessageToConnection() {
 
   try {
     console.log(`Sending message to ${connection.targetAgentName}...`);
-    
-    // Create the SendMessageToConnectionTool on demand with current hcsClient
-    const sendMessageToConnectionTool = new SendMessageToConnectionTool({ 
-      hcsClient, 
-      stateManager 
+    const sendMessageToConnectionTool = new SendMessageToConnectionTool({
+      hcsClient,
+      stateManager,
     });
-    const result = await sendMessageToConnectionTool._call({
+    const result = await sendMessageToConnectionTool.call({
       targetIdentifier: connection.targetAccountId,
-      message: messageContent
+      message: messageContent,
     });
 
     console.log(result);
@@ -582,14 +785,13 @@ async function viewMessagesFromConnection() {
 
   try {
     console.log(`Checking for messages from ${connection.targetAgentName}...`);
-    
-    // Create the CheckMessagesTool on demand with current hcsClient
-    const checkMessagesTool = new CheckMessagesTool({ 
-      hcsClient, 
-      stateManager 
+    const checkMessagesTool = new CheckMessagesTool({
+      hcsClient,
+      stateManager,
     });
-    const result = await checkMessagesTool._call({
-      targetIdentifier: connection.connectionTopicId
+    const result = await checkMessagesTool.call({
+      targetIdentifier: connection.targetAccountId,
+      lastMessagesCount: 10,
     });
 
     console.log(result);
@@ -623,6 +825,8 @@ async function showMenu() {
   console.log('  5. Stop Monitoring Incoming Connections');
   console.log('  6. Initiate Connection to Another Agent');
   console.log('  7. List Active Connections (for Active Agent)');
+  console.log('  10. Manage Connection Requests');
+  console.log('  11. Accept Connection Request (Direct)');
   console.log('-----------------------------------------');
   console.log('Messaging:');
   console.log('  8. Send Message to Active Connection');
@@ -661,6 +865,12 @@ async function showMenu() {
     case '9':
       await viewMessagesFromConnection();
       break;
+    case '10':
+      await manageConnectionRequests();
+      break;
+    case '11':
+      await acceptConnectionRequest();
+      break;
     case '0':
       console.log('Exiting demo...');
       if (isMonitoring) {
@@ -690,7 +900,13 @@ async function main() {
     });
     hcsClient = initResult.hcs10Client;
     connectionTool = initResult.tools.connectionTool;
-    // No global tool creation here - tools will be created on demand
+
+    // Initialize our ConnectionMonitorTool with the client
+    connectionMonitorTool = new ConnectionMonitorTool({
+      hcsClient: hcsClient,
+      stateManager: stateManager,
+    });
+
     console.log('Client initialized successfully.');
 
     const toddAccountId = process.env.TODD_ACCOUNT_ID;
@@ -731,6 +947,17 @@ async function main() {
       );
       console.log(`Client reconfigured for active agent: ${currentAgent.name}`);
 
+      // Recreate the connection tool with the agent's client
+      connectionTool = new ConnectionTool({
+        client: hcsClient,
+        stateManager: stateManager,
+      });
+
+      // Update our ConnectionMonitorTool with the new client
+      connectionMonitorTool.updateClient(hcsClient);
+
+      console.log('Connection tools reconfigured for active agent');
+
       // Update the state manager with the current agent
       stateManager.setCurrentAgent(currentAgent);
     } else {
@@ -738,12 +965,242 @@ async function main() {
         'Todd agent details not found in environment variables. Register or select an agent manually.'
       );
     }
-    // ---> END ADDITION
 
     await showMenu();
   } catch (error) {
     console.error('Failed to initialize HCS10 client:', error);
     rl.close();
+  }
+}
+
+async function acceptConnectionRequest() {
+  displayHeader('Accept Connection Request');
+  if (!currentAgent) {
+    console.log('No active agent selected.');
+    return;
+  }
+
+  const manageTool = new ManageConnectionRequestsTool({
+    hcsClient,
+    stateManager,
+  });
+
+  const acceptTool = new AcceptConnectionRequestTool({
+    hcsClient,
+    stateManager,
+  });
+
+  try {
+    console.log('Current pending requests:');
+    const listResult = await manageTool.call({ action: 'list' });
+    console.log(listResult);
+
+    if (listResult.includes('No pending connection requests found')) {
+      console.log('No requests to accept.');
+      return;
+    }
+
+    const requestId = await question('Enter request ID to accept: ');
+    const reqId = parseInt(requestId.trim());
+    if (isNaN(reqId)) {
+      console.log('Invalid request ID format.');
+      return;
+    }
+
+    const feeParams: any = { requestId: reqId };
+    const configureFees = await question(
+      'Configure fees for this connection? (y/n): '
+    );
+
+    if (configureFees.toLowerCase() === 'y') {
+      const hbarFees = [];
+      const tokenFees = [];
+      let defaultCollectorAccount = '';
+
+      // Configure default collector account (optional)
+      const configureDefaultCollector = await question(
+        'Configure default collector account? (y/n): '
+      );
+      if (configureDefaultCollector.toLowerCase() === 'y') {
+        defaultCollectorAccount = await question(
+          'Default collector account ID (leave blank for agent account): '
+        );
+        if (defaultCollectorAccount.trim()) {
+          feeParams.defaultCollectorAccount = defaultCollectorAccount.trim();
+        }
+      }
+
+      // Configure HBAR fees (can have multiple)
+      const configureHbarFees = await question('Configure HBAR fees? (y/n): ');
+      if (configureHbarFees.toLowerCase() === 'y') {
+        let addMore = true;
+
+        while (addMore) {
+          const hbarFeeStr = await question('HBAR fee amount: ');
+          if (hbarFeeStr.trim()) {
+            const amount = parseFloat(hbarFeeStr);
+            if (isNaN(amount) || amount <= 0) {
+              console.log('Invalid HBAR fee amount. Fee will not be added.');
+            } else {
+              const fee: any = { amount };
+
+              const collectorAccount = await question(
+                'Collector account ID (leave blank for default): '
+              );
+              if (collectorAccount.trim()) {
+                fee.collectorAccount = collectorAccount.trim();
+              }
+
+              hbarFees.push(fee);
+              console.log(
+                `Added HBAR fee: ${amount} HBAR${
+                  fee.collectorAccount ? ` to ${fee.collectorAccount}` : ''
+                }`
+              );
+            }
+          }
+
+          const addMoreResponse = await question(
+            'Add another HBAR fee? (y/n): '
+          );
+          addMore = addMoreResponse.toLowerCase() === 'y';
+        }
+
+        if (hbarFees.length > 0) {
+          feeParams.hbarFees = hbarFees;
+        }
+      }
+
+      // Configure token fees (can have multiple)
+      const configureTokenFees = await question(
+        'Configure token fees? (y/n): '
+      );
+      if (configureTokenFees.toLowerCase() === 'y') {
+        let addMore = true;
+
+        while (addMore) {
+          const tokenIdStr = await question('Token ID (e.g., 0.0.12345): ');
+
+          if (tokenIdStr.trim() && /^\d+\.\d+\.\d+$/.test(tokenIdStr.trim())) {
+            const tokenAmountStr = await question('Token amount per message: ');
+            const amount = parseFloat(tokenAmountStr);
+
+            if (isNaN(amount) || amount <= 0) {
+              console.log('Invalid token amount. Token fee will not be added.');
+            } else {
+              const fee: any = {
+                amount,
+                tokenId: tokenIdStr.trim(),
+              };
+
+              const collectorAccount = await question(
+                'Collector account ID (leave blank for default): '
+              );
+              if (collectorAccount.trim()) {
+                fee.collectorAccount = collectorAccount.trim();
+              }
+
+              tokenFees.push(fee);
+              console.log(
+                `Added token fee: ${amount} of token ${tokenIdStr}${
+                  fee.collectorAccount ? ` to ${fee.collectorAccount}` : ''
+                }`
+              );
+            }
+          } else {
+            console.log(
+              'Invalid token ID format. Token fee will not be added.'
+            );
+          }
+
+          const addMoreResponse = await question(
+            'Add another token fee? (y/n): '
+          );
+          addMore = addMoreResponse.toLowerCase() === 'y';
+        }
+
+        if (tokenFees.length > 0) {
+          feeParams.tokenFees = tokenFees;
+        }
+      }
+
+      // Configure exempt account IDs (applies to both fee types)
+      const configureExemptIds = await question(
+        'Configure exempt accounts? (y/n): '
+      );
+      if (configureExemptIds.toLowerCase() === 'y') {
+        const exemptAccountsInput = await question(
+          'Exempt account IDs (comma-separated, leave blank for none): '
+        );
+
+        if (exemptAccountsInput.trim()) {
+          const exemptIds = exemptAccountsInput
+            .split(',')
+            .map((id) => id.trim())
+            .filter((id) => /^\d+\.\d+\.\d+$/.test(id));
+
+          if (exemptIds.length === 0) {
+            console.log('No valid exempt account IDs provided.');
+          } else {
+            feeParams.exemptAccountIds = exemptIds;
+          }
+        }
+      }
+
+      // Show fee summary
+      console.log('\nFee configuration summary:');
+      if (feeParams.defaultCollectorAccount) {
+        console.log(
+          `- Default collector: ${feeParams.defaultCollectorAccount}`
+        );
+      }
+      if (feeParams.hbarFees && feeParams.hbarFees.length > 0) {
+        console.log('- HBAR fees:');
+        feeParams.hbarFees.forEach((fee) => {
+          console.log(
+            `  - ${fee.amount} HBAR${
+              fee.collectorAccount ? ` to ${fee.collectorAccount}` : ''
+            }`
+          );
+        });
+      }
+      if (feeParams.tokenFees && feeParams.tokenFees.length > 0) {
+        console.log('- Token fees:');
+        feeParams.tokenFees.forEach((fee) => {
+          console.log(
+            `  - ${fee.amount} of token ${fee.tokenId}${
+              fee.collectorAccount ? ` to ${fee.collectorAccount}` : ''
+            }`
+          );
+        });
+      }
+      if (feeParams.exemptAccountIds && feeParams.exemptAccountIds.length > 0) {
+        console.log(
+          `- Exempt accounts: ${feeParams.exemptAccountIds.join(', ')}`
+        );
+      }
+      if (!feeParams.hbarFees && !feeParams.tokenFees) {
+        console.log('- No fees configured');
+      }
+
+      const confirmFees = await question(
+        'Proceed with this fee configuration? (y/n): '
+      );
+      if (confirmFees.toLowerCase() !== 'y') {
+        console.log(
+          'Fee configuration canceled. Connection request will not be accepted.'
+        );
+        return;
+      }
+
+      const result = await acceptTool.call(feeParams);
+      console.log(result);
+    } else {
+      const result = await acceptTool.call({ requestId: reqId });
+      console.log(result);
+    }
+  } catch (error) {
+    console.error('\nError accepting connection request:', error);
   }
 }
 
