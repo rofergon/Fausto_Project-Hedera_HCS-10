@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
 import { initializeHCS10Client } from '../src/index';
-import { HCS10Client, ExtendedAgentMetadata } from '../src/hcs10/HCS10Client';
+import { HCS10Client } from '../src/hcs10/HCS10Client';
 import { ConnectionTool } from '../src/tools/ConnectionTool';
 import { ConnectionMonitorTool } from '../src/tools/ConnectionMonitorTool';
 import { ListConnectionsTool } from '../src/tools/ListConnectionsTool';
@@ -9,20 +9,16 @@ import { SendMessageToConnectionTool } from '../src/tools/SendMessageToConnectio
 import { CheckMessagesTool } from '../src/tools/CheckMessagesTool';
 import { ManageConnectionRequestsTool } from '../src/tools/ManageConnectionRequestsTool';
 import { AcceptConnectionRequestTool } from '../src/tools/AcceptConnectionRequestTool';
+import { ListUnapprovedConnectionRequestsTool } from '../src/tools/ListUnapprovedConnectionRequestsTool';
 import { OpenConvaiState } from '../src/state/open-convai-state';
 import readline from 'readline';
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { updateEnvFile } from './utils';
-import { ENV_FILE_PATH } from './utils';
-import { AIAgentCapability } from '@hashgraphonline/standards-sdk';
+import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..');
+// const __filename = fileURLToPath(import.meta.url); // Unused
+// const __dirname = path.dirname(__filename); // Unused
+// const projectRoot = path.join(__dirname, '..'); // Unused
 
 // --- Interfaces & State ---
 interface RegisteredAgent {
@@ -119,6 +115,326 @@ function displayCapabilities() {
   );
 }
 
+// Define fee-related types at file level
+interface FeeBase {
+  amount: number;
+  collectorAccount?: string;
+}
+
+interface TokenFee extends FeeBase {
+  tokenId: string;
+}
+
+interface FeeConfiguration {
+  defaultCollectorAccountId: string;
+  hbarFees: FeeBase[];
+  tokenFees: TokenFee[];
+  exemptAccountIds: string[];
+}
+
+async function promptForFeesConfiguration(): Promise<FeeConfiguration | null> {
+  const configureFees = await question(
+    'Configure fees for this agent? (y/n): '
+  );
+  if (configureFees.toLowerCase() !== 'y') {
+    return null;
+  }
+
+  const feeConfig: FeeConfiguration = {
+    defaultCollectorAccountId: '',
+    hbarFees: [],
+    tokenFees: [],
+    exemptAccountIds: [],
+  };
+
+  // Get default collector account
+  feeConfig.defaultCollectorAccountId = await question(
+    'Default fee collector account ID (leave blank to use agent account): '
+  );
+
+  // Configure HBAR fees (multiple allowed)
+  await configureHbarFees(feeConfig);
+
+  // Configure token fees (multiple allowed)
+  await configureTokenFees(feeConfig);
+
+  // Configure exempt account IDs
+  await configureExemptAccounts(feeConfig);
+
+  // Show fee summary and confirm
+  if (showFeeSummary(feeConfig) && (await confirmFeeConfiguration())) {
+    return feeConfig;
+  }
+  return null;
+}
+
+async function configureHbarFees(feeConfig: FeeConfiguration): Promise<void> {
+  const configureHbarFees = await question('Configure HBAR fees? (y/n): ');
+  if (configureHbarFees.toLowerCase() !== 'y') {
+    return;
+  }
+
+  const MAX_FEES = 10;
+  const totalCurrentFees =
+    feeConfig.hbarFees.length + feeConfig.tokenFees.length;
+  let feesRemaining = MAX_FEES - totalCurrentFees;
+
+  while (feesRemaining > 0) {
+    const feeIndex = feeConfig.hbarFees.length + 1;
+    const fee = await promptForHbarFee(
+      feeIndex,
+      feeConfig.defaultCollectorAccountId
+    );
+
+    if (!fee) {
+      break;
+    }
+
+    feeConfig.hbarFees.push(fee);
+    feesRemaining--;
+
+    if (feesRemaining <= 0) {
+      console.log(`Maximum number of fees (${MAX_FEES}) reached.`);
+      break;
+    }
+
+    const addAnother = await question(
+      `Add another HBAR fee? (${
+        MAX_FEES - feesRemaining
+      }/${MAX_FEES} fees configured) (y/n): `
+    );
+    if (addAnother.toLowerCase() !== 'y') {
+      break;
+    }
+  }
+}
+
+async function promptForHbarFee(
+  index: number,
+  defaultCollector: string
+): Promise<FeeBase | null> {
+  const hbarFeeStr = await question(`HBAR fee amount for fee #${index}: `);
+  if (!hbarFeeStr.trim()) {
+    return null;
+  }
+
+  const amount = parseFloat(hbarFeeStr);
+  if (isNaN(amount) || amount <= 0) {
+    console.log('Invalid HBAR fee amount. Fee will not be added.');
+    return null;
+  }
+
+  const fee: FeeBase = { amount };
+  const useDefaultCollector = await question(
+    'Use default collector account for this fee? (y/n): '
+  );
+  if (useDefaultCollector.toLowerCase() !== 'y') {
+    const collectorAccount = await question(
+      'Collector account ID for this fee: '
+    );
+    if (collectorAccount.trim()) {
+      fee.collectorAccount = collectorAccount.trim();
+    }
+  }
+
+  const collectorDisplay = getCollectorDisplay(
+    fee.collectorAccount,
+    defaultCollector
+  );
+  console.log(`Added HBAR fee: ${amount} HBAR ${collectorDisplay}`);
+
+  return fee;
+}
+
+async function configureTokenFees(feeConfig: FeeConfiguration): Promise<void> {
+  const configureTokenFees = await question('Configure token fees? (y/n): ');
+  if (configureTokenFees.toLowerCase() !== 'y') {
+    return;
+  }
+
+  const MAX_FEES = 10;
+  const totalCurrentFees =
+    feeConfig.hbarFees.length + feeConfig.tokenFees.length;
+  let feesRemaining = MAX_FEES - totalCurrentFees;
+
+  while (feesRemaining > 0) {
+    const feeIndex = totalCurrentFees + feeConfig.tokenFees.length + 1;
+    const fee = await promptForTokenFee(
+      feeIndex,
+      feeConfig.defaultCollectorAccountId
+    );
+
+    if (!fee) {
+      break;
+    }
+
+    feeConfig.tokenFees.push(fee);
+    feesRemaining--;
+
+    if (feesRemaining <= 0) {
+      console.log(`Maximum number of fees (${MAX_FEES}) reached.`);
+      break;
+    }
+
+    const addAnother = await question(
+      `Add another token fee? (${
+        MAX_FEES - feesRemaining
+      }/${MAX_FEES} fees configured) (y/n): `
+    );
+    if (addAnother.toLowerCase() !== 'y') {
+      break;
+    }
+  }
+}
+
+async function promptForTokenFee(
+  index: number,
+  defaultCollector: string
+): Promise<TokenFee | null> {
+  const tokenIdStr = await question(
+    `Token ID for fee #${index} (e.g., 0.0.12345): `
+  );
+  if (!tokenIdStr.trim() || !/^\d+\.\d+\.\d+$/.test(tokenIdStr.trim())) {
+    console.log('Invalid token ID format. Token fee will not be added.');
+    return null;
+  }
+
+  const tokenAmountStr = await question('Token amount per message: ');
+  const amount = parseFloat(tokenAmountStr);
+
+  if (isNaN(amount) || amount <= 0) {
+    console.log('Invalid token amount. Token fee will not be added.');
+    return null;
+  }
+
+  const fee: TokenFee = {
+    amount,
+    tokenId: tokenIdStr.trim(),
+  };
+
+  const useDefaultCollector = await question(
+    'Use default collector account for this fee? (y/n): '
+  );
+  if (useDefaultCollector.toLowerCase() !== 'y') {
+    const collectorAccount = await question(
+      'Collector account ID for this fee: '
+    );
+    if (collectorAccount.trim()) {
+      fee.collectorAccount = collectorAccount.trim();
+    }
+  }
+
+  const collectorDisplay = getCollectorDisplay(
+    fee.collectorAccount,
+    defaultCollector
+  );
+  console.log(
+    `Added token fee: ${amount} of token ${fee.tokenId} ${collectorDisplay}`
+  );
+
+  return fee;
+}
+
+function getCollectorDisplay(
+  specificCollector?: string,
+  defaultCollector?: string
+): string {
+  if (specificCollector) {
+    return `to be collected by ${specificCollector}`;
+  } else if (defaultCollector) {
+    return `to be collected by ${defaultCollector}`;
+  } else {
+    return 'to be collected by agent account';
+  }
+}
+
+async function configureExemptAccounts(
+  feeConfig: FeeConfiguration
+): Promise<void> {
+  const configureExemptIds = await question(
+    'Configure exempt accounts? (y/n): '
+  );
+  if (configureExemptIds.toLowerCase() !== 'y') {
+    return;
+  }
+
+  const exemptAccountsInput = await question(
+    'Exempt account IDs (comma-separated, leave blank for none): '
+  );
+
+  if (exemptAccountsInput.trim()) {
+    const exemptIds = exemptAccountsInput
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^\d+\.\d+\.\d+$/.test(id));
+
+    if (exemptIds.length === 0) {
+      console.log('No valid exempt account IDs provided.');
+    } else {
+      feeConfig.exemptAccountIds = exemptIds;
+      console.log(`Added ${exemptIds.length} exempt account(s).`);
+    }
+  }
+}
+
+function showFeeSummary(feeConfig: FeeConfiguration): boolean {
+  const hasAnyFees =
+    feeConfig.hbarFees.length > 0 || feeConfig.tokenFees.length > 0;
+
+  console.log('\nFee configuration summary:');
+
+  if (feeConfig.defaultCollectorAccountId) {
+    console.log(`- Default collector: ${feeConfig.defaultCollectorAccountId}`);
+  }
+
+  if (feeConfig.hbarFees.length > 0) {
+    console.log('- HBAR fees:');
+    feeConfig.hbarFees.forEach((fee) => {
+      console.log(
+        `  - ${fee.amount} HBAR ${
+          fee.collectorAccount
+            ? `to ${fee.collectorAccount}`
+            : 'to default collector'
+        }`
+      );
+    });
+  }
+
+  if (feeConfig.tokenFees.length > 0) {
+    console.log('- Token fees:');
+    feeConfig.tokenFees.forEach((fee) => {
+      console.log(
+        `  - ${fee.amount} of token ${fee.tokenId} ${
+          fee.collectorAccount
+            ? `to ${fee.collectorAccount}`
+            : 'to default collector'
+        }`
+      );
+    });
+  }
+
+  if (feeConfig.exemptAccountIds.length > 0) {
+    console.log(`- Exempt accounts: ${feeConfig.exemptAccountIds.join(', ')}`);
+  }
+
+  if (!hasAnyFees) {
+    console.log('- No fees configured');
+  }
+
+  return hasAnyFees;
+}
+
+async function confirmFeeConfiguration(): Promise<boolean> {
+  const confirmFees = await question(
+    'Proceed with this fee configuration? (y/n): '
+  );
+  if (confirmFees.toLowerCase() !== 'y') {
+    console.log('Fee configuration canceled. Proceeding without fees.');
+    return false;
+  }
+  return true;
+}
+
 // --- Agent Actions ---
 async function registerNewAgent() {
   displayHeader('Register New Agent');
@@ -128,17 +444,20 @@ async function registerNewAgent() {
     'Enter agent model identifier (optional, e.g., gpt-4o): '
   );
 
+  if (!name) {
+    console.error('Agent name is required.');
+    return;
+  }
+
   // Display capabilities and let user select
   displayCapabilities();
   console.log(
     '\nSelect capabilities (comma-separated numbers, e.g., "0,4,7"): '
   );
   const capabilitiesInput = await question('> ');
-
-  let capabilities: number[] = [AIAgentCapability.TEXT_GENERATION]; // Default
-
-  if (capabilitiesInput.trim()) {
-    try {
+  let capabilities: number[] | undefined = undefined;
+  try {
+    if (capabilitiesInput.trim()) {
       capabilities = capabilitiesInput.split(',').map((num) => {
         const parsed = parseInt(num.trim(), 10);
         if (isNaN(parsed) || parsed < 0 || parsed > 18) {
@@ -146,150 +465,124 @@ async function registerNewAgent() {
         }
         return parsed;
       });
-
       if (capabilities.length === 0) {
-        console.log(
-          'No valid capabilities selected, defaulting to TEXT_GENERATION only.'
-        );
-        capabilities = [AIAgentCapability.TEXT_GENERATION];
+        console.log('No valid capabilities selected, using tool default.');
+        capabilities = undefined; // Let tool default if empty after parse
       }
-    } catch (error) {
-      console.error(
-        `Error parsing capabilities: ${
-          error instanceof Error ? error.message : error
-        }`
-      );
-      console.log('Defaulting to TEXT_GENERATION capability only.');
-      capabilities = [AIAgentCapability.TEXT_GENERATION];
+    } else {
+      console.log('Using tool default capabilities (TEXT_GENERATION).');
+      capabilities = undefined; // Explicitly undefined to use default
     }
-  }
-
-  console.log(`Selected capabilities: ${capabilities.join(', ')}`);
-
-  const pfpPath = await question(
-    'Enter the path to the profile picture file (relative to project root, e.g., logo.png): '
-  );
-
-  if (!name) {
-    console.error('Agent name is required.');
-    return;
-  }
-
-  let pfpFileName: string | undefined = undefined;
-  let pfpBuffer: Buffer | undefined = undefined;
-
-  if (pfpPath) {
-    // Construct path relative to project root
-    const pfpLocation = path.join(projectRoot, pfpPath);
-    console.log(`Attempting to read profile picture from: ${pfpLocation}`);
-
-    try {
-      if (!fs.existsSync(pfpLocation)) {
-        throw new Error(`File not found at path: ${pfpLocation}`);
-      }
-
-      pfpBuffer = fs.readFileSync(pfpLocation);
-      pfpFileName = path.basename(pfpPath);
-      console.log(
-        `Read profile picture ${pfpFileName} (${pfpBuffer?.length} bytes).`
-      );
-
-      if (pfpBuffer?.length === 0) {
-        console.warn('Warning: The selected profile picture file is empty.');
-      }
-    } catch (fileError) {
-      console.error(
-        `Error reading profile picture file: ${
-          fileError instanceof Error ? fileError.message : fileError
-        }`
-      );
-      console.log(
-        'Proceeding without a profile picture. Agent registration might fail.'
-      );
-      pfpBuffer = undefined;
-      pfpFileName = undefined;
-    }
-  } else {
-    console.log(
-      'No profile picture path provided. Agent registration might fail if required.'
+  } catch (error) {
+    console.error(
+      `Error parsing capabilities: ${
+        error instanceof Error ? error.message : error
+      }`
     );
+    console.log('Using tool default capabilities (TEXT_GENERATION).');
+    capabilities = undefined;
   }
 
-  // Use the extended metadata type
-  const metadata: ExtendedAgentMetadata = {
-    name,
-    description,
-    model,
-    type: 'autonomous', // Defaulting to autonomous
-    capabilities, // Add the selected capabilities
-    pfpBuffer, // Add the buffer
-    pfpFileName, // Add the filename
-  };
+  console.log(`Selected capabilities: ${capabilities ? capabilities.join(', ') : 'Default'}`);
 
+  // Handle fee configuration
+  const feeConfig = await promptForFeesConfiguration();
+
+  // PFP Handling Removed - RegisterAgentTool does not support it yet
+  // const pfpPath = await question(...);
+  // ... pfp file reading logic removed ...
+
+  // --- Use RegisterAgentTool ---
   try {
     console.log(
-      `\nRegistering agent "${name}"... this may take several minutes.`
+      `\nRegistering agent "${name}" using RegisterAgentTool... this may take several minutes.`
     );
-    // Pass the metadata object which now includes PFP details (or undefined)
-    const result = await hcsClient.createAndRegisterAgent(metadata);
 
-    if (
-      !result?.metadata?.accountId ||
-      !result?.metadata?.inboundTopicId ||
-      !result?.metadata?.outboundTopicId
-    ) {
-      console.error('Registration failed. Result metadata incomplete:', result);
-      return;
-    }
+    const registerTool = new RegisterAgentTool(hcsClient);
 
-    const newAgent: RegisteredAgent = {
-      name: name,
-      accountId: result.metadata.accountId,
-      inboundTopicId: result.metadata.inboundTopicId,
-      outboundTopicId: result.metadata.outboundTopicId,
-      profileTopicId: result.metadata.profileTopicId,
-      operatorPrivateKey: result.metadata.privateKey,
+    // Prepare input based on tool schema
+    const toolInput: Record<string, any> = {
+      name,
+      description,
+      model,
+      capabilities,
     };
 
-    await updateEnvFile(ENV_FILE_PATH, {
-      TODD_ACCOUNT_ID: result?.metadata?.accountId,
-      TODD_PRIVATE_KEY: result?.metadata?.privateKey,
-      TODD_INBOUND_TOPIC_ID: result?.metadata?.inboundTopicId,
-      TODD_OUTBOUND_TOPIC_ID: result?.metadata?.outboundTopicId,
-    });
-
-    registeredAgents.push(newAgent);
-    console.log('\nRegistration Successful!');
-    displayAgentInfo(newAgent);
-
-    // Automatically select the newly registered agent
-    if (registeredAgents.length === 1) {
-      currentAgent = newAgent;
-      hcsClient = new HCS10Client(
-        newAgent.accountId,
-        newAgent.operatorPrivateKey,
-        hcsClient.getNetwork(),
-        {
-          useEncryption: false,
-          registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
-        }
-      );
-      console.log(
-        `\nAgent "${currentAgent.name}" automatically selected as active agent.`
-      );
+    if (feeConfig) {
+      toolInput.feeCollectorAccountId = feeConfig.defaultCollectorAccountId || undefined;
+      toolInput.hbarFees = feeConfig.hbarFees.length > 0 ? feeConfig.hbarFees : undefined;
+      toolInput.tokenFees = feeConfig.tokenFees.length > 0 ? feeConfig.tokenFees : undefined;
+      toolInput.exemptAccountIds = feeConfig.exemptAccountIds.length > 0 ? feeConfig.exemptAccountIds : undefined;
     }
 
-    // Recreate the connection tool with the agent's client
-    connectionTool = new ConnectionTool({
-      client: hcsClient,
-      stateManager: stateManager,
-    });
-    console.log('Connection tool reconfigured for active agent');
+    // Invoke the tool
+    const resultString = await registerTool.invoke(toolInput);
 
-    // Update the state manager with the current agent
-    stateManager.setCurrentAgent(currentAgent);
+    // Process the result string
+    try {
+      const result = JSON.parse(resultString);
+
+      if (result.success && result.accountId && result.privateKey && result.inboundTopicId && result.outboundTopicId) {
+        const newAgent: RegisteredAgent = {
+          name: result.name,
+          accountId: result.accountId,
+          inboundTopicId: result.inboundTopicId,
+          outboundTopicId: result.outboundTopicId,
+          profileTopicId: result.profileTopicId !== 'N/A' ? result.profileTopicId : undefined,
+          operatorPrivateKey: result.privateKey,
+        };
+
+        // Note: Tool already updates .env file internally
+        // await updateEnvFile(ENV_FILE_PATH, { ... });
+
+        registeredAgents.push(newAgent);
+        console.log('\nRegistration Successful!');
+        console.log(result.message || resultString);
+        displayAgentInfo(newAgent);
+
+        // Automatically select the newly registered agent if it's the first one
+        if (registeredAgents.length === 1) {
+          currentAgent = newAgent;
+          // Reconfigure client and tools for the new agent
+          hcsClient = new HCS10Client(
+            currentAgent.accountId,
+            currentAgent.operatorPrivateKey,
+            hcsClient.getNetwork(),
+            {
+              useEncryption: false,
+              registryUrl: process.env.REGISTRY_URL || 'https://moonscape.tech',
+            }
+          );
+          connectionTool = new ConnectionTool({ client: hcsClient, stateManager });
+          connectionMonitorTool.updateClient(hcsClient);
+          stateManager.setCurrentAgent(currentAgent);
+          console.log(
+            `\nAgent "${currentAgent.name}" automatically selected as active agent.`
+          );
+          console.log('Client and tools reconfigured.');
+        } else {
+           // Update state manager if an agent was already active
+           if (currentAgent) {
+              stateManager.setCurrentAgent(currentAgent);
+           } else {
+              // If no agent was active, select the new one
+              console.log(`\nPlease select agent ${registeredAgents.length} to make it active.`);
+           }
+        }
+      } else {
+        // Handle cases where parsing succeeded but registration wasn't fully successful
+        console.error('Registration via tool reported an issue or missing data:');
+        console.log(result.message || resultString);
+      }
+    } catch (parseError) {
+      // Handle cases where the result string wasn't valid JSON (likely an error message)
+      console.error('\nRegistration failed. Tool returned an error:');
+      console.error(resultString);
+    }
+
   } catch (error) {
-    console.error('\nError registering agent:', error);
+    // Catch unexpected errors during tool instantiation or invocation
+    console.error('\nError during agent registration process:', error);
   }
 }
 
@@ -373,7 +666,7 @@ async function startMonitoringConnections() {
 
   try {
     // Use the ConnectionMonitorTool to start monitoring
-    const result = await connectionMonitorTool.call({
+    const result = await connectionMonitorTool.invoke({
       acceptAll: true,
       monitorDurationSeconds: 60,
     });
@@ -459,20 +752,8 @@ async function initiateConnection() {
       stateManager,
     });
 
-    const configureFees = await question(
-      'Configure fees for this connection? (y/n): '
-    );
-
-    if (configureFees.toLowerCase() === 'y') {
-      console.log(
-        'Note: Fee configuration is not supported by the InitiateConnectionTool in this implementation.'
-      );
-      const result = await initiateConnectionTool.call({ targetAccountId });
-      console.log(result);
-    } else {
-      const result = await initiateConnectionTool.call({ targetAccountId });
-      console.log(result);
-    }
+    const result = await initiateConnectionTool.invoke({ targetAccountId });
+    console.log(result);
   } catch (error) {
     console.error(
       '\nUnexpected error during connection initiation:',
@@ -501,7 +782,7 @@ async function listActiveConnections() {
     // Create the ListConnectionsTool on demand with current hcsClient
     const listTool = new ListConnectionsTool({ stateManager, hcsClient });
 
-    const connectionListOutput = await listTool.call({
+    const connectionListOutput = await listTool.invoke({
       includeDetails: true,
       showPending: true,
     });
@@ -554,7 +835,7 @@ async function manageConnectionRequests() {
   switch (choice.trim()) {
     case '1':
       try {
-        const result = await manageTool.call({ action: 'list' });
+        const result = await manageTool.invoke({ action: 'list' });
         console.log(result);
       } catch (error) {
         console.error('\nError listing requests:', error);
@@ -569,7 +850,7 @@ async function manageConnectionRequests() {
           console.log('Invalid request ID format.');
           break;
         }
-        const result = await manageTool.call({
+        const result = await manageTool.invoke({
           action: 'view',
           requestId: reqId,
         });
@@ -617,14 +898,14 @@ async function manageConnectionRequests() {
             }
           }
 
-          const result = await acceptTool.call({
+          const result = await acceptTool.invoke({
             requestId: reqId,
             hbarFee,
             exemptAccountIds: exemptIds,
           });
           console.log(result);
         } else {
-          const result = await acceptTool.call({
+          const result = await acceptTool.invoke({
             requestId: reqId,
           });
           console.log(result);
@@ -642,7 +923,7 @@ async function manageConnectionRequests() {
           console.log('Invalid request ID format.');
           break;
         }
-        const result = await manageTool.call({
+        const result = await manageTool.invoke({
           action: 'reject',
           requestId: reqId,
         });
@@ -678,7 +959,7 @@ async function selectConnection(
   try {
     // Create the ListConnectionsTool on demand with current hcsClient
     const listTool = new ListConnectionsTool({ stateManager, hcsClient });
-    await listTool.call({
+    await listTool.invoke({
       includeDetails: false,
       showPending: true,
     });
@@ -755,7 +1036,7 @@ async function sendMessageToConnection() {
       hcsClient,
       stateManager,
     });
-    const result = await sendMessageToConnectionTool.call({
+    const result = await sendMessageToConnectionTool.invoke({
       targetIdentifier: connection.targetAccountId,
       message: messageContent,
     });
@@ -789,7 +1070,7 @@ async function viewMessagesFromConnection() {
       hcsClient,
       stateManager,
     });
-    const result = await checkMessagesTool.call({
+    const result = await checkMessagesTool.invoke({
       targetIdentifier: connection.targetAccountId,
       lastMessagesCount: 10,
     });
@@ -800,6 +1081,35 @@ async function viewMessagesFromConnection() {
       '\nUnexpected error checking messages:',
       error instanceof Error ? error.message : error
     );
+  }
+}
+
+async function listUnapprovedConnectionRequests() {
+  displayHeader('Unapproved Connection Requests');
+  if (!currentAgent) {
+    console.log('No active agent selected.');
+    return;
+  }
+
+  try {
+    console.log(
+      `Fetching unapproved connection requests for ${currentAgent.name} (${currentAgent.accountId})...`
+    );
+
+    if (!stateManager) {
+      console.error('State manager is not initialized!');
+      return;
+    }
+
+    const listTool = new ListUnapprovedConnectionRequestsTool({
+      stateManager,
+      hcsClient,
+    });
+
+    const requestsOutput = await listTool.invoke({});
+    console.log(requestsOutput);
+  } catch (error) {
+    console.error('\nError listing unapproved connection requests:', error);
   }
 }
 
@@ -827,6 +1137,7 @@ async function showMenu() {
   console.log('  7. List Active Connections (for Active Agent)');
   console.log('  10. Manage Connection Requests');
   console.log('  11. Accept Connection Request (Direct)');
+  console.log('  12. List Unapproved Connection Requests');
   console.log('-----------------------------------------');
   console.log('Messaging:');
   console.log('  8. Send Message to Active Connection');
@@ -870,6 +1181,9 @@ async function showMenu() {
       break;
     case '11':
       await acceptConnectionRequest();
+      break;
+    case '12':
+      await listUnapprovedConnectionRequests();
       break;
     case '0':
       console.log('Exiting demo...');
@@ -992,7 +1306,7 @@ async function acceptConnectionRequest() {
 
   try {
     console.log('Current pending requests:');
-    const listResult = await manageTool.call({ action: 'list' });
+    const listResult = await manageTool.invoke({ action: 'list' });
     console.log(listResult);
 
     if (listResult.includes('No pending connection requests found')) {
@@ -1007,14 +1321,36 @@ async function acceptConnectionRequest() {
       return;
     }
 
-    const feeParams: any = { requestId: reqId };
+    interface FeeParams {
+      requestId: number;
+      defaultCollectorAccount?: string;
+      hbarFees?: Array<{
+        amount: number;
+        collectorAccount?: string;
+      }>;
+      tokenFees?: Array<{
+        amount: number;
+        tokenId: string;
+        collectorAccount?: string;
+      }>;
+      exemptAccountIds?: string[];
+    }
+
+    const feeParams: FeeParams = { requestId: reqId };
     const configureFees = await question(
       'Configure fees for this connection? (y/n): '
     );
 
     if (configureFees.toLowerCase() === 'y') {
-      const hbarFees = [];
-      const tokenFees = [];
+      const hbarFees: Array<{
+        amount: number;
+        collectorAccount?: string;
+      }> = [];
+      const tokenFees: Array<{
+        amount: number;
+        tokenId: string;
+        collectorAccount?: string;
+      }> = [];
       let defaultCollectorAccount = '';
 
       // Configure default collector account (optional)
@@ -1042,7 +1378,9 @@ async function acceptConnectionRequest() {
             if (isNaN(amount) || amount <= 0) {
               console.log('Invalid HBAR fee amount. Fee will not be added.');
             } else {
-              const fee: any = { amount };
+              const fee: { amount: number; collectorAccount?: string } = {
+                amount,
+              };
 
               const collectorAccount = await question(
                 'Collector account ID (leave blank for default): '
@@ -1088,7 +1426,11 @@ async function acceptConnectionRequest() {
             if (isNaN(amount) || amount <= 0) {
               console.log('Invalid token amount. Token fee will not be added.');
             } else {
-              const fee: any = {
+              const fee: {
+                amount: number;
+                tokenId: string;
+                collectorAccount?: string;
+              } = {
                 amount,
                 tokenId: tokenIdStr.trim(),
               };
@@ -1193,10 +1535,10 @@ async function acceptConnectionRequest() {
         return;
       }
 
-      const result = await acceptTool.call(feeParams);
+      const result = await acceptTool.invoke(feeParams);
       console.log(result);
     } else {
-      const result = await acceptTool.call({ requestId: reqId });
+      const result = await acceptTool.invoke({ requestId: reqId });
       console.log(result);
     }
   } catch (error) {
