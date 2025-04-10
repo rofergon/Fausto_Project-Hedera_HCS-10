@@ -17,7 +17,7 @@ module.exports = {
     'no-var': 'error',
     'prefer-const': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'warn',
-    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-explicit-any': 'error',
     'block-scoped-var': 'error',
     curly: ['error', 'all'],
     eqeqeq: ['error', 'always'],
@@ -25,7 +25,7 @@ module.exports = {
     quotes: ['error', 'single', { avoidEscape: true }],
     semi: ['error', 'always'],
     'arrow-body-style': ['error', 'as-needed'],
-    'no-unused-vars': 'off',
+    'no-unused-vars': 'error',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
   },
   overrides: [

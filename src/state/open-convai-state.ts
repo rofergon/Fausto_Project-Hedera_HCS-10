@@ -6,111 +6,270 @@ export interface RegisteredAgent {
   profileTopicId?: string;
 }
 
+export type ConnectionStatus =
+  | 'established'
+  | 'pending'
+  | 'needs confirmation'
+  | 'unknown';
+
+export interface AgentProfileInfo {
+  name?: string;
+  bio?: string;
+  avatar?: string;
+  type?: string;
+}
+
+export interface ConnectionRequestInfo {
+  id: number;
+  requestorId: string;
+  requestorName: string;
+  timestamp: Date;
+  memo?: string;
+  profile?: AgentProfileInfo;
+}
+
 export interface ActiveConnection {
   targetAccountId: string;
   targetAgentName: string;
   targetInboundTopicId: string;
   connectionTopicId: string;
-}
-
-export interface IStateManager {
-  setCurrentAgent(agent: RegisteredAgent | null): void;
-  getCurrentAgent(): RegisteredAgent | null;
-  addActiveConnection(connection: ActiveConnection): void;
-  listConnections(): ActiveConnection[];
-  getConnectionByIdentifier(identifier: string): ActiveConnection | undefined;
-  getLastTimestamp(connectionTopicId: string): number;
-  updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
+  status?: ConnectionStatus;
+  created?: Date;
+  lastActivity?: Date;
+  isPending?: boolean;
+  needsConfirmation?: boolean;
+  profileInfo?: AgentProfileInfo;
 }
 
 /**
- * An example implementation of the `IStateManager` interface.
- * All tools should have a state manager instance.
+ * Core state management interface for the standards agent toolkit.
+ * All tools that need to maintain state should use an implementation of this interface.
+ */
+export interface IStateManager {
+  /**
+   * Sets the current active agent, clearing any previous connections.
+   */
+  setCurrentAgent(agent: RegisteredAgent | null): void;
+
+  /**
+   * Gets the current active agent.
+   */
+  getCurrentAgent(): RegisteredAgent | null;
+
+  /**
+   * Adds a new active connection to the state.
+   * Will not add duplicates based on connectionTopicId.
+   */
+  addActiveConnection(connection: ActiveConnection): void;
+
+  /**
+   * Updates an existing connection or adds it if not found.
+   * Preserves existing properties when updating.
+   */
+  updateOrAddConnection(connection: ActiveConnection): void;
+
+  /**
+   * Lists all active connections for the current agent.
+   */
+  listConnections(): ActiveConnection[];
+
+  /**
+   * Finds a connection by identifier, which can be:
+   * - A 1-based index number as shown in the connection list
+   * - A target account ID
+   * - A connection topic ID
+   */
+  getConnectionByIdentifier(identifier: string): ActiveConnection | undefined;
+
+  /**
+   * Gets the last processed message timestamp for a connection.
+   */
+  getLastTimestamp(connectionTopicId: string): number;
+
+  /**
+   * Updates the last processed message timestamp for a connection.
+   */
+  updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
+
+  /**
+   * Stores a connection request in the state.
+   */
+  addConnectionRequest(request: ConnectionRequestInfo): void;
+
+  /**
+   * Lists all pending connection requests.
+   */
+  listConnectionRequests(): ConnectionRequestInfo[];
+
+  /**
+   * Finds a connection request by its ID.
+   */
+  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined;
+
+  /**
+   * Removes a connection request from the state.
+   */
+  removeConnectionRequest(requestId: number): void;
+
+  /**
+   * Clears all connection requests from the state.
+   */
+  clearConnectionRequests(): void;
+}
+
+/**
+ * Implementation of the IStateManager interface for the OpenConvai system.
+ * Manages agent state and connection information with thread safety and
+ * proper timestamp tracking.
  */
 export class OpenConvaiState implements IStateManager {
-  currentAgent: RegisteredAgent | null = null;
-  activeConnections: ActiveConnection[] = [];
-  // Store last processed consensus timestamp (in nanoseconds) for message polling
-  connectionMessageTimestamps: { [connectionTopicId: string]: number } = {};
+  private currentAgent: RegisteredAgent | null = null;
+  private activeConnections: ActiveConnection[] = [];
+  private connectionMessageTimestamps: Record<string, number> = {};
+  private connectionRequests: Map<number, ConnectionRequestInfo> = new Map();
 
-  // --- Agent Management ---
+  /**
+   * Sets the current active agent and clears any previous connection data.
+   * This should be called when switching between agents.
+   */
   setCurrentAgent(agent: RegisteredAgent | null): void {
-    console.log(
-      `[OpenConvaiState] Setting active agent: ${agent?.name ?? 'None'}`
-    );
     this.currentAgent = agent;
-    // Clear connections when agent changes
     this.activeConnections = [];
     this.connectionMessageTimestamps = {};
+    this.connectionRequests.clear();
   }
 
+  /**
+   * Returns the currently active agent or null if none is set.
+   */
   getCurrentAgent(): RegisteredAgent | null {
     return this.currentAgent;
   }
 
-  // --- Connection Management ---
+  /**
+   * Adds a new connection to the active connections list.
+   * Ensures no duplicates are added based on connectionTopicId.
+   * Initializes timestamp tracking for the connection.
+   */
   addActiveConnection(connection: ActiveConnection): void {
-    // Avoid duplicates
-    if (
-      !this.activeConnections.some(
-        (c) => c.connectionTopicId === connection.connectionTopicId
-      )
-    ) {
-      console.log(
-        `[OpenConvaiState] Adding active connection to ${connection.targetAgentName} (${connection.targetAccountId})`
-      );
-      this.activeConnections.push(connection);
-      // Initialize timestamp - use current time as rough estimate
-      this.connectionMessageTimestamps[connection.connectionTopicId] =
-        Date.now() * 1_000_000;
+    if (this.findConnectionIndex(connection.connectionTopicId) !== -1) {
+      return;
+    }
+
+    this.activeConnections.push({ ...connection });
+
+    this.initializeTimestampIfNeeded(connection.connectionTopicId);
+  }
+
+  /**
+   * Updates an existing connection or adds it if not found.
+   * Preserves existing properties when updating by merging objects.
+   */
+  updateOrAddConnection(connection: ActiveConnection): void {
+    const index = this.findConnectionIndex(connection.connectionTopicId);
+
+    if (index !== -1) {
+      this.activeConnections[index] = {
+        ...this.activeConnections[index],
+        ...connection,
+      };
     } else {
-      console.log(
-        `[OpenConvaiState] Connection to ${connection.targetAgentName} already exists.`
-      );
+      this.addActiveConnection(connection);
     }
+
+    this.initializeTimestampIfNeeded(connection.connectionTopicId);
   }
 
+  /**
+   * Returns a copy of all active connections.
+   */
   listConnections(): ActiveConnection[] {
-    return [...this.activeConnections]; // Return a copy
+    return [...this.activeConnections];
   }
 
+  /**
+   * Finds a connection by its identifier, which can be:
+   * - A 1-based index as displayed in the connection list
+   * - A target account ID string
+   * - A connection topic ID string
+   */
   getConnectionByIdentifier(identifier: string): ActiveConnection | undefined {
-    const index = parseInt(identifier) - 1; // Check if it's a 1-based index
-    if (!isNaN(index) && index >= 0 && index < this.activeConnections.length) {
-      return this.activeConnections[index];
+    const numericIndex = parseInt(identifier) - 1;
+    if (
+      !isNaN(numericIndex) &&
+      numericIndex >= 0 &&
+      numericIndex < this.activeConnections.length
+    ) {
+      return this.activeConnections[numericIndex];
     }
-    // Check if it's a targetAccountId or connectionTopicId
+
     return this.activeConnections.find(
-      (c) =>
-        c.targetAccountId === identifier || c.connectionTopicId === identifier
+      (conn) =>
+        conn.targetAccountId === identifier ||
+        conn.connectionTopicId === identifier
     );
   }
 
-  // --- Message Timestamp Management ---
+  /**
+   * Gets the last processed message timestamp for a connection.
+   * Returns 0 if no timestamp has been recorded.
+   */
   getLastTimestamp(connectionTopicId: string): number {
-    // Find connection by topic ID first to adhere to potential interface
-    for (const entry of this.activeConnections) {
-      if (entry.connectionTopicId === connectionTopicId) {
-        return this.connectionMessageTimestamps[connectionTopicId] || 0;
-      }
-    }
-    return 0;
+    return this.connectionMessageTimestamps[connectionTopicId] || 0;
   }
 
+  /**
+   * Updates the last processed message timestamp for a connection,
+   * but only if the new timestamp is more recent than the existing one.
+   */
   updateTimestamp(connectionTopicId: string, timestampNanos: number): void {
-    for (const entry of this.activeConnections) {
-      if (entry.connectionTopicId === connectionTopicId) {
-        if (
-          timestampNanos >
-          (this.connectionMessageTimestamps[connectionTopicId] || 0)
-        ) {
-          console.log(
-            `[OpenConvaiState] Updating timestamp for topic ${connectionTopicId} to ${timestampNanos}`
-          );
-          this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
-        }
-        return; // Exit once found and updated
+    if (connectionTopicId in this.connectionMessageTimestamps) {
+      const currentTimestamp =
+        this.connectionMessageTimestamps[connectionTopicId];
+      if (timestampNanos > currentTimestamp) {
+        this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
       }
     }
+  }
+
+  /**
+   * Helper method to find a connection's index by its topic ID.
+   * Returns -1 if not found.
+   */
+  private findConnectionIndex(connectionTopicId: string): number {
+    return this.activeConnections.findIndex(
+      (conn) => conn.connectionTopicId === connectionTopicId
+    );
+  }
+
+  /**
+   * Helper method to initialize timestamp tracking for a connection
+   * if it doesn't already exist.
+   */
+  private initializeTimestampIfNeeded(connectionTopicId: string): void {
+    if (!(connectionTopicId in this.connectionMessageTimestamps)) {
+      this.connectionMessageTimestamps[connectionTopicId] =
+        Date.now() * 1_000_000;
+    }
+  }
+
+  addConnectionRequest(request: ConnectionRequestInfo): void {
+    this.connectionRequests.set(request.id, { ...request });
+  }
+
+  listConnectionRequests(): ConnectionRequestInfo[] {
+    return Array.from(this.connectionRequests.values());
+  }
+
+  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined {
+    return this.connectionRequests.get(requestId);
+  }
+
+  removeConnectionRequest(requestId: number): void {
+    this.connectionRequests.delete(requestId);
+  }
+
+  clearConnectionRequests(): void {
+    this.connectionRequests.clear();
   }
 }
