@@ -1434,7 +1434,16 @@ async function sendWeatherReportViaMessage() {
     }
     
     // Send the message
-    await connectionTool.sendMessage(selectedConnection.connectionId, messageText);
+    const sendMessageToConnectionTool = new SendMessageToConnectionTool({
+      hcsClient,
+      stateManager,
+    });
+    
+    await sendMessageToConnectionTool.invoke({
+      targetIdentifier: selectedConnection.targetAccountId,
+      message: messageText
+    });
+    
     console.log('Weather report sent successfully!');
     
   } catch (error) {
