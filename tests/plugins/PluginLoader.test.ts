@@ -131,11 +131,26 @@ describe('PluginLoader', () => {
   });
   
   test('should load a plugin from a package', async () => {
-    // Mock the loadFromDirectory method to avoid actual implementation
-    const loadFromDirectorySpy = jest.spyOn(PluginLoader, 'loadFromDirectory').mockResolvedValue(new MockPlugin());
+    // Create a mock plugin instance
+    const mockPlugin = new MockPlugin();
     
-    await PluginLoader.loadFromPackage('plugin-package', mockContext);
+    // Mock require.resolve to avoid actual filesystem access
+    jest.spyOn(require, 'resolve').mockReturnValue('/node_modules/plugin-package/index.js');
     
+    // Mock path.dirname to return the expected directory
+    (path.dirname as jest.Mock).mockReturnValue('/node_modules/plugin-package');
+    
+    // Mock loadFromDirectory to return our mock plugin
+    const loadFromDirectorySpy = jest.spyOn(PluginLoader, 'loadFromDirectory')
+      .mockImplementation(async () => mockPlugin);
+    
+    // Call the method under test
+    const result = await PluginLoader.loadFromPackage('plugin-package', mockContext);
+    
+    // Verify loadFromDirectory was called with the correct parameters
     expect(loadFromDirectorySpy).toHaveBeenCalledWith('/node_modules/plugin-package', mockContext, { initialize: true });
+    
+    // Verify the result is our mock plugin
+    expect(result).toBe(mockPlugin);
   });
 });
