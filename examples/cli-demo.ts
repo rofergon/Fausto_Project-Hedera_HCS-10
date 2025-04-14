@@ -1325,7 +1325,20 @@ async function sendWeatherReportViaMessage() {
   }
   
   // Check for active connections
-  const connections = await connectionTool.listConnections();
+  // First refresh connections using ListConnectionsTool
+  try {
+    const listTool = new ListConnectionsTool({ stateManager, hcsClient });
+    await listTool.invoke({
+      includeDetails: false,
+      showPending: true,
+    });
+  } catch (error) {
+    console.error('Error refreshing connections:', error);
+    // Continue with what we have in state, even if refresh failed
+  }
+  
+  // Now get the updated list from state manager
+  const connections = stateManager.listConnections();
   if (!connections || connections.length === 0) {
     console.log('No active connections available. Please establish a connection first (option 6).');
     return;
