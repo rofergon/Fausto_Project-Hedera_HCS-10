@@ -1005,11 +1005,7 @@ async function showMenu() {
   console.log('  9. View Incoming Messages from Active Connection');
   console.log('-----------------------------------------');
   console.log('Plugin System:');
-  console.log('  13. Initialize Plugin System');
-  console.log('  14. List Available Plugins');
-  console.log('  15. Load Weather Plugin');
-  console.log('  16. Load DeFi Plugin');
-  console.log('  17. Use Plugin Tool');
+  console.log('  13. Use Plugin Tool');
   console.log('-----------------------------------------');
   console.log('  0. Exit');
   console.log('=========================================');
@@ -1054,18 +1050,6 @@ async function showMenu() {
       await listUnapprovedConnectionRequests();
       break;
     case '13':
-      await initializePluginSystem();
-      break;
-    case '14':
-      await listAvailablePlugins();
-      break;
-    case '15':
-      await loadWeatherPlugin();
-      break;
-    case '16':
-      await loadDeFiPlugin();
-      break;
-    case '17':
       await usePluginTool();
       break;
     case '0':
@@ -1412,6 +1396,47 @@ async function main() {
       }
     } else {
       console.log('No agents found. Please register a new agent.');
+    }
+
+    // Automatically initialize plugin system
+    try {
+      console.log('\nAutomatically initializing plugin system...');
+      
+      // Create plugin context
+      pluginContext = {
+        client: hcsClient,
+        logger: {
+          info: console.log,
+          warn: console.warn,
+          error: console.error,
+          debug: console.debug,
+        },
+        config: {
+          weatherApiKey: process.env.WEATHER_API_KEY,
+        }
+      };
+      
+      // Initialize plugin registry
+      pluginRegistry = new PluginRegistry(pluginContext);
+      
+      // Load and register plugins
+      const weatherPlugin = new WeatherPlugin();
+      const defiPlugin = new DeFiPlugin();
+      
+      await pluginRegistry.registerPlugin(weatherPlugin);
+      await pluginRegistry.registerPlugin(defiPlugin);
+      
+      console.log('Plugin system initialized successfully!');
+      console.log('Weather and DeFi plugins loaded automatically.');
+      
+      if (!process.env.WEATHER_API_KEY) {
+        console.log('\nNote: Weather API key not found in environment variables.');
+        console.log('Weather plugin tools will not function correctly without an API key.');
+        console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
+      }
+    } catch (error) {
+      console.error('Error initializing plugin system:', error);
+      console.log('Continuing without plugin functionality.');
     }
 
     await showMenu();
