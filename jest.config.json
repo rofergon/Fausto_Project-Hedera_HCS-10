@@ -4,5 +4,11 @@
   },
   "testEnvironment": "node",
   "testRegex": "(/tests/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
-  "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"]
+  "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"],
+  "setupFilesAfterEnv": ["./jest.setup.js"],
+  "testPathIgnorePatterns": [
+    "/node_modules/",
+    "/tests/hcs10/",
+    "/tests/tools/"
+  ]
 }
