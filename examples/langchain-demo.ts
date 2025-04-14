@@ -17,6 +17,11 @@ import { SendMessageTool } from '../src/tools/SendMessageTool';
 import { IStateManager } from '../src/state/state-types';
 import { OpenConvaiState } from '../src/state/open-convai-state';
 
+// Import plugin system components
+import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
+import WeatherPlugin from './plugins/weather';
+import DeFiPlugin from './plugins/defi';
+
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
 import { AgentExecutor, createOpenAIToolsAgent } from 'langchain/agents';
@@ -46,6 +51,10 @@ The current agent you are operating as is configured via environment variables (
 When asked to perform an action, use the available tools. Ask for clarification if needed.
 Be concise and informative in your responses.
 
+You also have access to a plugin system that provides additional tools for various functionalities:
+- Weather tools: Get current weather and weather forecasts for locations
+- DeFi tools: Get token prices, check token balances, and simulate token swaps
+
 *** IMPORTANT TOOL SELECTION RULES ***
 - To REGISTER a new agent, use 'register_agent'.
 - To FIND existing registered agents in the registry, use 'find_registrations'. You can filter by accountId or tags.
@@ -53,6 +62,8 @@ Be concise and informative in your responses.
 - To LISTEN for INCOMING connection requests FROM other agents, use the 'monitor_connections' tool (it takes NO arguments).
 - To ACCEPT incoming connection requests, use the 'accept_connection_request' tool.
 - To MANAGE and VIEW pending connection requests, use the 'manage_connection_requests' tool.
+- For WEATHER information, use the appropriate weather plugin tools.
+- For DeFi operations, use the appropriate DeFi plugin tools.
 - Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
@@ -65,6 +76,10 @@ let memory: ConversationTokenBufferMemory;
 let connectionMonitor: ConnectionTool | null = null;
 let connectionMonitorTool: ConnectionMonitorTool | null = null;
 let tools: StructuredToolInterface[] = [];
+
+// Plugin system state
+let pluginRegistry: PluginRegistry | null = null;
+let pluginContext: PluginContext | null = null;
 
 /**
  * Loads agent details from environment variables using a specified prefix
@@ -289,6 +304,52 @@ async function initialize() {
     ) as ConnectionMonitorTool | null;
 
     console.log('Tools initialized.');
+
+    // Initialize plugin system
+    try {
+      console.log('Initializing plugin system...');
+      
+      // Create plugin context
+      pluginContext = {
+        client: hcsClient,
+        logger: {
+          info: console.log,
+          warn: console.warn,
+          error: console.error,
+          debug: console.debug,
+        },
+        config: {
+          weatherApiKey: process.env.WEATHER_API_KEY,
+        }
+      };
+      
+      // Initialize plugin registry
+      pluginRegistry = new PluginRegistry(pluginContext);
+      
+      // Load and register plugins
+      const weatherPlugin = new WeatherPlugin();
+      const defiPlugin = new DeFiPlugin();
+      
+      await pluginRegistry.registerPlugin(weatherPlugin);
+      await pluginRegistry.registerPlugin(defiPlugin);
+      
+      console.log('Plugin system initialized successfully.');
+      
+      // Get plugin tools and add them to the tools array
+      const pluginTools = pluginRegistry.getAllTools();
+      tools = [...tools, ...pluginTools];
+      
+      console.log(`Added ${pluginTools.length} plugin tools to the agent's toolkit.`);
+      
+      if (!process.env.WEATHER_API_KEY) {
+        console.log('\nNote: Weather API key not found in environment variables.');
+        console.log('Weather plugin tools will not function correctly without an API key.');
+        console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
+      }
+    } catch (error) {
+      console.error('Error initializing plugin system:', error);
+      console.log('Continuing without plugin functionality.');
+    }
 
     // --- Initialize LangChain Components ---
     const llm = new ChatOpenAI({

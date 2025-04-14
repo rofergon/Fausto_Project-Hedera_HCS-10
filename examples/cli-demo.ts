@@ -16,6 +16,10 @@ import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { updateEnvFile } from './utils';
+// Import plugin system components
+import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
+import WeatherPlugin from './plugins/weather';
+import DeFiPlugin from './plugins/defi';
 
 dotenv.config();
 
@@ -47,6 +51,10 @@ let currentAgent: RegisteredAgent | null = null;
 const registeredAgents: RegisteredAgent[] = [];
 let stateManager: OpenConvaiState;
 let isMonitoring = false; // Track monitoring status explicitly
+
+// Plugin system state
+let pluginRegistry: PluginRegistry | null = null;
+let pluginContext: PluginContext | null = null;
 
 // --- Readline Setup ---
 const rl = readline.createInterface({
@@ -976,6 +984,7 @@ async function showMenu() {
     }`
   );
   console.log(`Monitoring Status: ${isMonitoring ? 'ACTIVE' : 'INACTIVE'}`);
+  console.log(`Plugin System: ${pluginRegistry ? 'INITIALIZED' : 'NOT INITIALIZED'}`);
   console.log('-----------------------------------------');
   console.log('Agent Management:');
   console.log('  1. Register New Agent');
@@ -994,6 +1003,13 @@ async function showMenu() {
   console.log('Messaging:');
   console.log('  8. Send Message to Active Connection');
   console.log('  9. View Incoming Messages from Active Connection');
+  console.log('-----------------------------------------');
+  console.log('Plugin System:');
+  console.log('  13. Initialize Plugin System');
+  console.log('  14. List Available Plugins');
+  console.log('  15. Load Weather Plugin');
+  console.log('  16. Load DeFi Plugin');
+  console.log('  17. Use Plugin Tool');
   console.log('-----------------------------------------');
   console.log('  0. Exit');
   console.log('=========================================');
@@ -1037,6 +1053,21 @@ async function showMenu() {
     case '12':
       await listUnapprovedConnectionRequests();
       break;
+    case '13':
+      await initializePluginSystem();
+      break;
+    case '14':
+      await listAvailablePlugins();
+      break;
+    case '15':
+      await loadWeatherPlugin();
+      break;
+    case '16':
+      await loadDeFiPlugin();
+      break;
+    case '17':
+      await usePluginTool();
+      break;
     case '0':
       console.log('Exiting demo...');
       if (isMonitoring) {
@@ -1059,6 +1090,237 @@ let initResult: {
   tools: Partial<HCS10Tools>;
   stateManager: IStateManager;
 };
+
+// --- Plugin System Functions ---
+async function initializePluginSystem() {
+  displayHeader('Initialize Plugin System');
+  
+  if (!currentAgent) {
+    console.log('No active agent selected. Please select an agent first.');
+    return;
+  }
+  
+  try {
+    // Create plugin context
+    pluginContext = {
+      client: hcsClient,
+      logger: {
+        info: console.log,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug,
+      },
+      config: {
+        weatherApiKey: process.env.WEATHER_API_KEY,
+      }
+    };
+    
+    // Initialize plugin registry
+    pluginRegistry = new PluginRegistry(pluginContext);
+    
+    console.log('Plugin system initialized successfully!');
+    console.log('You can now load and use plugins.');
+    
+    if (!process.env.WEATHER_API_KEY) {
+      console.log('\nNote: Weather API key not found in environment variables.');
+      console.log('To use the Weather plugin, set WEATHER_API_KEY in your .env file.');
+    }
+  } catch (error) {
+    console.error('Error initializing plugin system:', error);
+  }
+}
+
+async function listAvailablePlugins() {
+  displayHeader('Available Plugins');
+  
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized. Please initialize it first (option 13).');
+    return;
+  }
+  
+  const plugins = pluginRegistry.getAllPlugins();
+  
+  if (plugins.length === 0) {
+    console.log('No plugins loaded. Use options 15-16 to load plugins.');
+    return;
+  }
+  
+  console.log(`Loaded plugins (${plugins.length}):`);
+  plugins.forEach((plugin, index) => {
+    console.log(`${index + 1}. ${plugin.name} (${plugin.id}) v${plugin.version} by ${plugin.author}`);
+    console.log(`   Description: ${plugin.description}`);
+  });
+  
+  // Also show available tools from all plugins
+  const tools = pluginRegistry.getAllTools();
+  console.log(`\nAvailable tools (${tools.length}):`);
+  tools.forEach((tool, index) => {
+    console.log(`${index + 1}. ${tool.name}: ${tool.description}`);
+  });
+}
+
+async function loadWeatherPlugin() {
+  displayHeader('Load Weather Plugin');
+  
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized. Please initialize it first (option 13).');
+    return;
+  }
+  
+  try {
+    // Check if plugin is already loaded
+    const existingPlugins = pluginRegistry.getAllPlugins();
+    const weatherPluginExists = existingPlugins.some(p => p.id === 'weather-api');
+    
+    if (weatherPluginExists) {
+      console.log('Weather plugin is already loaded.');
+      return;
+    }
+    
+    // Create and register the plugin
+    const weatherPlugin = new WeatherPlugin();
+    await pluginRegistry.registerPlugin(weatherPlugin);
+    
+    console.log('Weather plugin loaded successfully!');
+    
+    if (!process.env.WEATHER_API_KEY) {
+      console.log('\nWarning: Weather API key not found in environment variables.');
+      console.log('The plugin is loaded but will not function correctly without an API key.');
+      console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
+    }
+  } catch (error) {
+    console.error('Error loading Weather plugin:', error);
+  }
+}
+
+async function loadDeFiPlugin() {
+  displayHeader('Load DeFi Plugin');
+  
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized. Please initialize it first (option 13).');
+    return;
+  }
+  
+  try {
+    // Check if plugin is already loaded
+    const existingPlugins = pluginRegistry.getAllPlugins();
+    const defiPluginExists = existingPlugins.some(p => p.id === 'defi-integration');
+    
+    if (defiPluginExists) {
+      console.log('DeFi plugin is already loaded.');
+      return;
+    }
+    
+    // Create and register the plugin
+    const defiPlugin = new DeFiPlugin();
+    await pluginRegistry.registerPlugin(defiPlugin);
+    
+    console.log('DeFi plugin loaded successfully!');
+  } catch (error) {
+    console.error('Error loading DeFi plugin:', error);
+  }
+}
+
+async function usePluginTool() {
+  displayHeader('Use Plugin Tool');
+  
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized. Please initialize it first (option 13).');
+    return;
+  }
+  
+  const tools = pluginRegistry.getAllTools();
+  
+  if (tools.length === 0) {
+    console.log('No plugin tools available. Load plugins first (options 15-16).');
+    return;
+  }
+  
+  // Display available tools
+  console.log('Available tools:');
+  tools.forEach((tool, index) => {
+    console.log(`${index + 1}. ${tool.name}: ${tool.description}`);
+  });
+  
+  // Let user select a tool
+  const toolChoice = await question('Select a tool (enter number): ');
+  const toolIndex = parseInt(toolChoice) - 1;
+  
+  if (isNaN(toolIndex) || toolIndex < 0 || toolIndex >= tools.length) {
+    console.log('Invalid tool selection.');
+    return;
+  }
+  
+  const selectedTool = tools[toolIndex];
+  console.log(`\nSelected tool: ${selectedTool.name}`);
+  console.log(`Description: ${selectedTool.description}`);
+  
+  // Handle different tools with specific parameter prompts
+  try {
+    let result;
+    
+    if (selectedTool.name === 'get_current_weather') {
+      const location = await question('Enter location (e.g., London, UK): ');
+      const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
+      
+      result = await selectedTool._call({
+        location,
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+      });
+    } 
+    else if (selectedTool.name === 'get_weather_forecast') {
+      const location = await question('Enter location (e.g., London, UK): ');
+      const daysStr = await question('Enter number of days (1-7): ');
+      const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
+      
+      const days = parseInt(daysStr);
+      
+      result = await selectedTool._call({
+        location,
+        days: isNaN(days) ? 3 : days,
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+      });
+    }
+    else if (selectedTool.name === 'get_token_price') {
+      const tokenId = await question('Enter token ID (e.g., 0.0.1234): ');
+      
+      result = await selectedTool._call({
+        tokenId
+      });
+    }
+    else if (selectedTool.name === 'swap_tokens') {
+      const fromTokenId = await question('Enter source token ID (e.g., 0.0.1234): ');
+      const toTokenId = await question('Enter destination token ID (e.g., 0.0.5678): ');
+      const amountStr = await question('Enter amount to swap: ');
+      
+      const amount = parseFloat(amountStr);
+      
+      result = await selectedTool._call({
+        fromTokenId,
+        toTokenId,
+        amount: isNaN(amount) ? 1 : amount
+      });
+    }
+    else if (selectedTool.name === 'check_token_balance') {
+      const tokenId = await question('Enter token ID (e.g., 0.0.1234): ');
+      const accountId = await question('Enter account ID (optional, press Enter to use current agent): ');
+      
+      result = await selectedTool._call({
+        tokenId,
+        accountId: accountId.trim() || undefined
+      });
+    }
+    else {
+      console.log('This tool requires custom parameters that are not supported in this demo.');
+      return;
+    }
+    
+    console.log('\nResult:');
+    console.log(result);
+  } catch (error) {
+    console.error('Error using tool:', error);
+  }
+}
 
 // --- Initialization and Start ---
 async function main() {
