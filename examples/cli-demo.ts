@@ -1006,6 +1006,7 @@ async function showMenu() {
   console.log('-----------------------------------------');
   console.log('Plugin System:');
   console.log('  13. Use Plugin Tool');
+  console.log('  14. Send Weather Report via Message');
   console.log('-----------------------------------------');
   console.log('  0. Exit');
   console.log('=========================================');
@@ -1051,6 +1052,9 @@ async function showMenu() {
       break;
     case '13':
       await usePluginTool();
+      break;
+    case '14':
+      await sendWeatherReportViaMessage();
       break;
     case '0':
       console.log('Exiting demo...');
@@ -1306,6 +1310,125 @@ async function usePluginTool() {
   }
 }
 
+// --- Weather-Messaging Integration ---
+async function sendWeatherReportViaMessage() {
+  displayHeader('Send Weather Report via Message');
+  
+  if (!currentAgent) {
+    console.log('No active agent selected. Please select an agent first.');
+    return;
+  }
+  
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized. Please try again.');
+    return;
+  }
+  
+  // Check for active connections
+  const connections = await connectionTool.listConnections();
+  if (!connections || connections.length === 0) {
+    console.log('No active connections available. Please establish a connection first (option 6).');
+    return;
+  }
+  
+  // Display available connections
+  console.log('Available connections:');
+  connections.forEach((conn, index) => {
+    console.log(`${index + 1}. ${conn.targetAccountId} (${conn.status})`);
+  });
+  
+  // Let user select a connection
+  const connChoice = await question('Select a connection to send weather report to (enter number): ');
+  const connIndex = parseInt(connChoice) - 1;
+  
+  if (isNaN(connIndex) || connIndex < 0 || connIndex >= connections.length) {
+    console.log('Invalid connection selection.');
+    return;
+  }
+  
+  const selectedConnection = connections[connIndex];
+  console.log(`\nSelected connection: ${selectedConnection.targetAccountId}`);
+  
+  // Get weather tools from plugin registry
+  const weatherTools = pluginRegistry.getAllTools().filter(tool => 
+    tool.name === 'get_current_weather' || tool.name === 'get_weather_forecast'
+  );
+  
+  if (weatherTools.length === 0) {
+    console.log('Weather tools not available. Please check plugin initialization.');
+    return;
+  }
+  
+  // Let user choose between current weather and forecast
+  console.log('\nWeather report options:');
+  console.log('1. Current Weather');
+  console.log('2. Weather Forecast');
+  
+  const reportChoice = await question('Select report type (enter number): ');
+  
+  let weatherTool;
+  if (reportChoice === '1') {
+    weatherTool = weatherTools.find(tool => tool.name === 'get_current_weather');
+  } else if (reportChoice === '2') {
+    weatherTool = weatherTools.find(tool => tool.name === 'get_weather_forecast');
+  } else {
+    console.log('Invalid report type selection.');
+    return;
+  }
+  
+  if (!weatherTool) {
+    console.log('Selected weather tool not available.');
+    return;
+  }
+  
+  // Get location from user
+  const location = await question('Enter location (e.g., London, UK): ');
+  const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
+  
+  try {
+    let weatherReport;
+    
+    // Get weather data based on selected tool
+    if (weatherTool.name === 'get_current_weather') {
+      weatherReport = await weatherTool._call({
+        location,
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+      });
+    } else {
+      const daysStr = await question('Enter number of days for forecast (1-7): ');
+      const days = parseInt(daysStr);
+      
+      weatherReport = await weatherTool._call({
+        location,
+        days: isNaN(days) ? 3 : days,
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+      });
+    }
+    
+    // Prepare message with weather report
+    const messageText = `🌤️ Weather Report 🌤️\n\n${weatherReport}\n\nSent from HCS-10 CLI Demo using the Weather Plugin`;
+    
+    console.log('\nSending the following weather report:');
+    console.log('-----------------------------------');
+    console.log(messageText);
+    console.log('-----------------------------------');
+    
+    // Confirm before sending
+    const confirm = await question('Send this weather report? (y/n): ');
+    if (confirm.toLowerCase() !== 'y') {
+      console.log('Weather report sending cancelled.');
+      return;
+    }
+    
+    // Send the message
+    await connectionTool.sendMessage(selectedConnection.connectionId, messageText);
+    console.log('Weather report sent successfully!');
+    
+  } catch (error) {
+    console.error('Error sending weather report:', error);
+  }
+}
+
 // --- Initialization and Start ---
 async function main() {
   console.log('Initializing HCS10 client...');
@@ -1402,7 +1525,10 @@ async function main() {
     try {
       console.log('\nAutomatically initializing plugin system...');
       
-      // Create plugin context
+      // Load Weather API key from environment with better error handling
+      const weatherApiKey = process.env.WEATHER_API_KEY;
+      
+      // Create plugin context with explicit environment variable handling
       pluginContext = {
         client: hcsClient,
         logger: {
@@ -1412,7 +1538,7 @@ async function main() {
           debug: console.debug,
         },
         config: {
-          weatherApiKey: process.env.WEATHER_API_KEY,
+          weatherApiKey: weatherApiKey,
         }
       };
       
@@ -1429,10 +1555,13 @@ async function main() {
       console.log('Plugin system initialized successfully!');
       console.log('Weather and DeFi plugins loaded automatically.');
       
-      if (!process.env.WEATHER_API_KEY) {
-        console.log('\nNote: Weather API key not found in environment variables.');
-        console.log('Weather plugin tools will not function correctly without an API key.');
-        console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
+      if (!weatherApiKey) {
+        console.log('\nWARNING: Weather API key not found in environment variables.');
+        console.log('To use the Weather plugin, add the following to your .env file:');
+        console.log('WEATHER_API_KEY=your_api_key_from_weatherapi.com');
+        console.log('You can get a free API key from https://www.weatherapi.com/');
+      } else {
+        console.log(`Weather API key loaded successfully from environment variables.`);
       }
     } catch (error) {
       console.error('Error initializing plugin system:', error);
