@@ -58,14 +58,12 @@ export interface HCS10Tools {
  * @param options - Initialization options
  * @returns Object containing hcs10Client and requested tools
  */
-export async function initializeHCS10Client(
-  options?: HCS10InitializationOptions
-): Promise<{
+export function initializeHCS10Client(options?: HCS10InitializationOptions): {
   hcs10Client: HCS10Client;
   monitoringClient?: HCS10Client;
   tools: Partial<HCS10Tools>;
   stateManager: IStateManager;
-}> {
+} {
   // Set up the configuration
   const config = options?.clientConfig || {};
 
