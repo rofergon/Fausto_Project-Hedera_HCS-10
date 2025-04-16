@@ -9,3 +9,5 @@ export * from './FindRegistrationsTool';
 export * from './ConnectionMonitorTool';
 export * from './ManageConnectionRequestsTool';
 export * from './AcceptConnectionRequestTool';
+export * from './RetrieveProfileTool';
+export * from './ListUnapprovedConnectionRequestsTool';
