@@ -20,6 +20,7 @@ import { updateEnvFile } from './utils';
 import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
+import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
@@ -984,7 +985,9 @@ async function showMenu() {
     }`
   );
   console.log(`Monitoring Status: ${isMonitoring ? 'ACTIVE' : 'INACTIVE'}`);
-  console.log(`Plugin System: ${pluginRegistry ? 'INITIALIZED' : 'NOT INITIALIZED'}`);
+  console.log(
+    `Plugin System: ${pluginRegistry ? 'INITIALIZED' : 'NOT INITIALIZED'}`
+  );
   console.log('-----------------------------------------');
   console.log('Agent Management:');
   console.log('  1. Register New Agent');
@@ -1079,230 +1082,111 @@ let initResult: {
   stateManager: IStateManager;
 };
 
-// --- Plugin System Functions ---
-async function initializePluginSystem() {
-  displayHeader('Initialize Plugin System');
-  
-  if (!currentAgent) {
-    console.log('No active agent selected. Please select an agent first.');
-    return;
-  }
-  
-  try {
-    // Create plugin context
-    pluginContext = {
-      client: hcsClient,
-      logger: {
-        info: console.log,
-        warn: console.warn,
-        error: console.error,
-        debug: console.debug,
-      },
-      config: {
-        weatherApiKey: process.env.WEATHER_API_KEY,
-      }
-    };
-    
-    // Initialize plugin registry
-    pluginRegistry = new PluginRegistry(pluginContext);
-    
-    console.log('Plugin system initialized successfully!');
-    console.log('You can now load and use plugins.');
-    
-    if (!process.env.WEATHER_API_KEY) {
-      console.log('\nNote: Weather API key not found in environment variables.');
-      console.log('To use the Weather plugin, set WEATHER_API_KEY in your .env file.');
-    }
-  } catch (error) {
-    console.error('Error initializing plugin system:', error);
-  }
-}
-
-async function listAvailablePlugins() {
-  displayHeader('Available Plugins');
-  
-  if (!pluginRegistry) {
-    console.log('Plugin system not initialized. Please initialize it first (option 13).');
-    return;
-  }
-  
-  const plugins = pluginRegistry.getAllPlugins();
-  
-  if (plugins.length === 0) {
-    console.log('No plugins loaded. Use options 15-16 to load plugins.');
-    return;
-  }
-  
-  console.log(`Loaded plugins (${plugins.length}):`);
-  plugins.forEach((plugin, index) => {
-    console.log(`${index + 1}. ${plugin.name} (${plugin.id}) v${plugin.version} by ${plugin.author}`);
-    console.log(`   Description: ${plugin.description}`);
-  });
-  
-  // Also show available tools from all plugins
-  const tools = pluginRegistry.getAllTools();
-  console.log(`\nAvailable tools (${tools.length}):`);
-  tools.forEach((tool, index) => {
-    console.log(`${index + 1}. ${tool.name}: ${tool.description}`);
-  });
-}
-
-async function loadWeatherPlugin() {
-  displayHeader('Load Weather Plugin');
-  
-  if (!pluginRegistry) {
-    console.log('Plugin system not initialized. Please initialize it first (option 13).');
-    return;
-  }
-  
-  try {
-    // Check if plugin is already loaded
-    const existingPlugins = pluginRegistry.getAllPlugins();
-    const weatherPluginExists = existingPlugins.some(p => p.id === 'weather-api');
-    
-    if (weatherPluginExists) {
-      console.log('Weather plugin is already loaded.');
-      return;
-    }
-    
-    // Create and register the plugin
-    const weatherPlugin = new WeatherPlugin();
-    await pluginRegistry.registerPlugin(weatherPlugin);
-    
-    console.log('Weather plugin loaded successfully!');
-    
-    if (!process.env.WEATHER_API_KEY) {
-      console.log('\nWarning: Weather API key not found in environment variables.');
-      console.log('The plugin is loaded but will not function correctly without an API key.');
-      console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
-    }
-  } catch (error) {
-    console.error('Error loading Weather plugin:', error);
-  }
-}
-
-async function loadDeFiPlugin() {
-  displayHeader('Load DeFi Plugin');
-  
-  if (!pluginRegistry) {
-    console.log('Plugin system not initialized. Please initialize it first (option 13).');
-    return;
-  }
-  
-  try {
-    // Check if plugin is already loaded
-    const existingPlugins = pluginRegistry.getAllPlugins();
-    const defiPluginExists = existingPlugins.some(p => p.id === 'defi-integration');
-    
-    if (defiPluginExists) {
-      console.log('DeFi plugin is already loaded.');
-      return;
-    }
-    
-    // Create and register the plugin
-    const defiPlugin = new DeFiPlugin();
-    await pluginRegistry.registerPlugin(defiPlugin);
-    
-    console.log('DeFi plugin loaded successfully!');
-  } catch (error) {
-    console.error('Error loading DeFi plugin:', error);
-  }
-}
-
 async function usePluginTool() {
   displayHeader('Use Plugin Tool');
-  
+
   if (!pluginRegistry) {
-    console.log('Plugin system not initialized. Please initialize it first (option 13).');
+    console.log(
+      'Plugin system not initialized. Please initialize it first (option 13).'
+    );
     return;
   }
-  
+
   const tools = pluginRegistry.getAllTools();
-  
+
   if (tools.length === 0) {
-    console.log('No plugin tools available. Load plugins first (options 15-16).');
+    console.log(
+      'No plugin tools available. Load plugins first (options 15-16).'
+    );
     return;
   }
-  
+
   // Display available tools
   console.log('Available tools:');
   tools.forEach((tool, index) => {
     console.log(`${index + 1}. ${tool.name}: ${tool.description}`);
   });
-  
+
   // Let user select a tool
   const toolChoice = await question('Select a tool (enter number): ');
   const toolIndex = parseInt(toolChoice) - 1;
-  
+
   if (isNaN(toolIndex) || toolIndex < 0 || toolIndex >= tools.length) {
     console.log('Invalid tool selection.');
     return;
   }
-  
+
   const selectedTool = tools[toolIndex];
   console.log(`\nSelected tool: ${selectedTool.name}`);
   console.log(`Description: ${selectedTool.description}`);
-  
+
   // Handle different tools with specific parameter prompts
   try {
     let result;
-    
+
     if (selectedTool.name === 'get_current_weather') {
       const location = await question('Enter location (e.g., London, UK): ');
-      const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
-      
-      result = await selectedTool._call({
+      const unit = await question(
+        'Enter temperature unit (celsius/fahrenheit): '
+      );
+
+      result = await selectedTool.invoke({
         location,
-        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
       });
-    } 
-    else if (selectedTool.name === 'get_weather_forecast') {
+    } else if (selectedTool.name === 'get_weather_forecast') {
       const location = await question('Enter location (e.g., London, UK): ');
       const daysStr = await question('Enter number of days (1-7): ');
-      const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
-      
+      const unit = await question(
+        'Enter temperature unit (celsius/fahrenheit): '
+      );
+
       const days = parseInt(daysStr);
-      
-      result = await selectedTool._call({
+
+      result = await selectedTool.invoke({
         location,
         days: isNaN(days) ? 3 : days,
-        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
       });
-    }
-    else if (selectedTool.name === 'get_token_price') {
+    } else if (selectedTool.name === 'get_token_price') {
       const tokenId = await question('Enter token ID (e.g., 0.0.1234): ');
-      
-      result = await selectedTool._call({
-        tokenId
+
+      result = await selectedTool.invoke({
+        tokenId,
       });
-    }
-    else if (selectedTool.name === 'swap_tokens') {
-      const fromTokenId = await question('Enter source token ID (e.g., 0.0.1234): ');
-      const toTokenId = await question('Enter destination token ID (e.g., 0.0.5678): ');
+    } else if (selectedTool.name === 'swap_tokens') {
+      const fromTokenId = await question(
+        'Enter source token ID (e.g., 0.0.1234): '
+      );
+      const toTokenId = await question(
+        'Enter destination token ID (e.g., 0.0.5678): '
+      );
       const amountStr = await question('Enter amount to swap: ');
-      
+
       const amount = parseFloat(amountStr);
-      
-      result = await selectedTool._call({
+
+      result = await selectedTool.invoke({
         fromTokenId,
         toTokenId,
-        amount: isNaN(amount) ? 1 : amount
+        amount: isNaN(amount) ? 1 : amount,
       });
-    }
-    else if (selectedTool.name === 'check_token_balance') {
+    } else if (selectedTool.name === 'check_token_balance') {
       const tokenId = await question('Enter token ID (e.g., 0.0.1234): ');
-      const accountId = await question('Enter account ID (optional, press Enter to use current agent): ');
-      
-      result = await selectedTool._call({
+      const accountId = await question(
+        'Enter account ID (optional, press Enter to use current agent): '
+      );
+
+      result = await selectedTool.invoke({
         tokenId,
-        accountId: accountId.trim() || undefined
+        accountId: accountId.trim() || undefined,
       });
-    }
-    else {
-      console.log('This tool requires custom parameters that are not supported in this demo.');
+    } else {
+      console.log(
+        'This tool requires custom parameters that are not supported in this demo.'
+      );
       return;
     }
-    
+
     console.log('\nResult:');
     console.log(result);
   } catch (error) {
@@ -1313,17 +1197,17 @@ async function usePluginTool() {
 // --- Weather-Messaging Integration ---
 async function sendWeatherReportViaMessage() {
   displayHeader('Send Weather Report via Message');
-  
+
   if (!currentAgent) {
     console.log('No active agent selected. Please select an agent first.');
     return;
   }
-  
+
   if (!pluginRegistry) {
     console.log('Plugin system not initialized. Please try again.');
     return;
   }
-  
+
   // Check for active connections
   // First refresh connections using ListConnectionsTool
   try {
@@ -1336,116 +1220,131 @@ async function sendWeatherReportViaMessage() {
     console.error('Error refreshing connections:', error);
     // Continue with what we have in state, even if refresh failed
   }
-  
+
   // Now get the updated list from state manager
   const connections = stateManager.listConnections();
   if (!connections || connections.length === 0) {
-    console.log('No active connections available. Please establish a connection first (option 6).');
+    console.log(
+      'No active connections available. Please establish a connection first (option 6).'
+    );
     return;
   }
-  
+
   // Display available connections
   console.log('Available connections:');
   connections.forEach((conn, index) => {
     console.log(`${index + 1}. ${conn.targetAccountId} (${conn.status})`);
   });
-  
+
   // Let user select a connection
-  const connChoice = await question('Select a connection to send weather report to (enter number): ');
+  const connChoice = await question(
+    'Select a connection to send weather report to (enter number): '
+  );
   const connIndex = parseInt(connChoice) - 1;
-  
+
   if (isNaN(connIndex) || connIndex < 0 || connIndex >= connections.length) {
     console.log('Invalid connection selection.');
     return;
   }
-  
+
   const selectedConnection = connections[connIndex];
   console.log(`\nSelected connection: ${selectedConnection.targetAccountId}`);
-  
+
   // Get weather tools from plugin registry
-  const weatherTools = pluginRegistry.getAllTools().filter(tool => 
-    tool.name === 'get_current_weather' || tool.name === 'get_weather_forecast'
-  );
-  
+  const weatherTools = pluginRegistry
+    .getAllTools()
+    .filter(
+      (tool) =>
+        tool.name === 'get_current_weather' ||
+        tool.name === 'get_weather_forecast'
+    );
+
   if (weatherTools.length === 0) {
-    console.log('Weather tools not available. Please check plugin initialization.');
+    console.log(
+      'Weather tools not available. Please check plugin initialization.'
+    );
     return;
   }
-  
+
   // Let user choose between current weather and forecast
   console.log('\nWeather report options:');
   console.log('1. Current Weather');
   console.log('2. Weather Forecast');
-  
+
   const reportChoice = await question('Select report type (enter number): ');
-  
+
   let weatherTool;
   if (reportChoice === '1') {
-    weatherTool = weatherTools.find(tool => tool.name === 'get_current_weather');
+    weatherTool = weatherTools.find(
+      (tool) => tool.name === 'get_current_weather'
+    );
   } else if (reportChoice === '2') {
-    weatherTool = weatherTools.find(tool => tool.name === 'get_weather_forecast');
+    weatherTool = weatherTools.find(
+      (tool) => tool.name === 'get_weather_forecast'
+    );
   } else {
     console.log('Invalid report type selection.');
     return;
   }
-  
+
   if (!weatherTool) {
     console.log('Selected weather tool not available.');
     return;
   }
-  
+
   // Get location from user
   const location = await question('Enter location (e.g., London, UK): ');
   const unit = await question('Enter temperature unit (celsius/fahrenheit): ');
-  
+
   try {
     let weatherReport;
-    
+
     // Get weather data based on selected tool
     if (weatherTool.name === 'get_current_weather') {
-      weatherReport = await weatherTool._call({
+      weatherReport = await weatherTool.invoke({
         location,
-        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
       });
     } else {
-      const daysStr = await question('Enter number of days for forecast (1-7): ');
+      const daysStr = await question(
+        'Enter number of days for forecast (1-7): '
+      );
       const days = parseInt(daysStr);
-      
-      weatherReport = await weatherTool._call({
+
+      weatherReport = await weatherTool.invoke({
         location,
         days: isNaN(days) ? 3 : days,
-        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius'
+        unit: unit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
       });
     }
-    
+
     // Prepare message with weather report
     const messageText = `🌤️ Weather Report 🌤️\n\n${weatherReport}\n\nSent from HCS-10 CLI Demo using the Weather Plugin`;
-    
+
     console.log('\nSending the following weather report:');
     console.log('-----------------------------------');
     console.log(messageText);
     console.log('-----------------------------------');
-    
+
     // Confirm before sending
     const confirm = await question('Send this weather report? (y/n): ');
     if (confirm.toLowerCase() !== 'y') {
       console.log('Weather report sending cancelled.');
       return;
     }
-    
+
     // Send the message
     const sendMessageToConnectionTool = new SendMessageToConnectionTool({
       hcsClient,
       stateManager,
     });
-    
+
     await sendMessageToConnectionTool.invoke({
       targetIdentifier: selectedConnection.targetAccountId,
-      message: messageText
+      message: messageText,
     });
-    
+
     console.log('Weather report sent successfully!');
-    
   } catch (error) {
     console.error('Error sending weather report:', error);
   }
@@ -1459,7 +1358,7 @@ async function main() {
     stateManager = new OpenConvaiState();
     console.log('State manager initialized with default prefix: TODD');
 
-    initResult = await initializeHCS10Client({
+    initResult = initializeHCS10Client({
       stateManager: stateManager,
     });
 
@@ -1546,44 +1445,49 @@ async function main() {
     // Automatically initialize plugin system
     try {
       console.log('\nAutomatically initializing plugin system...');
-      
+
       // Load Weather API key from environment with better error handling
       const weatherApiKey = process.env.WEATHER_API_KEY;
-      
+
       // Create plugin context with explicit environment variable handling
       pluginContext = {
         client: hcsClient,
-        logger: {
-          info: console.log,
-          warn: console.warn,
-          error: console.error,
-          debug: console.debug,
-        },
+        logger: new Logger({
+          module: 'WeatherPlugin',
+        }),
         config: {
           weatherApiKey: weatherApiKey,
-        }
+        },
       };
-      
+
       // Initialize plugin registry
       pluginRegistry = new PluginRegistry(pluginContext);
-      
+
       // Load and register plugins
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
-      
+
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
-      
+
       console.log('Plugin system initialized successfully!');
       console.log('Weather and DeFi plugins loaded automatically.');
-      
+
       if (!weatherApiKey) {
-        console.log('\nWARNING: Weather API key not found in environment variables.');
-        console.log('To use the Weather plugin, add the following to your .env file:');
+        console.log(
+          '\nWARNING: Weather API key not found in environment variables.'
+        );
+        console.log(
+          'To use the Weather plugin, add the following to your .env file:'
+        );
         console.log('WEATHER_API_KEY=your_api_key_from_weatherapi.com');
-        console.log('You can get a free API key from https://www.weatherapi.com/');
+        console.log(
+          'You can get a free API key from https://www.weatherapi.com/'
+        );
       } else {
-        console.log(`Weather API key loaded successfully from environment variables.`);
+        console.log(
+          `Weather API key loaded successfully from environment variables.`
+        );
       }
     } catch (error) {
       console.error('Error initializing plugin system:', error);
