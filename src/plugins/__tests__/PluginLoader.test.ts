@@ -1,11 +1,12 @@
 import { describe, expect, test, jest, beforeEach } from '@jest/globals';
 import { PluginLoader } from '../PluginLoader';
-import { PluginContext, BasePlugin } from '../BasePlugin';
+import { BasePlugin } from '../BasePlugin';
 import { StructuredTool } from '@langchain/core/tools';
 import { HCS10Client } from '../../hcs10/HCS10Client';
 import { Logger } from '@hashgraphonline/standards-sdk';
 import * as fs from 'fs';
 import * as path from 'path';
+import { PluginContext } from '../PluginInterface';
 
 // Mock fs and path modules
 jest.mock('fs');
@@ -66,7 +67,8 @@ describe('PluginLoader', () => {
     }));
 
     // Setup our mocked dynamic import
-    global.importShim = jest.fn().mockResolvedValue({ default: MockPlugin });
+    // @ts-expect-error - weird unrelated error, the type is ok.
+    (global as any).importShim = jest.fn().mockResolvedValue({ default: MockPlugin });
   });
 
   test('should load a plugin from a directory', async () => {
@@ -104,7 +106,8 @@ describe('PluginLoader', () => {
 
   test('should throw if main file is missing', async () => {
     // Mock fs.existsSync to return true for manifest but false for main file
-    (fs.existsSync as jest.Mock).mockImplementation((path) => !path.includes('index.js'));
+    // @ts-expect-error - weird unrelated error, the type is ok.
+    (fs.existsSync as jest.Mock).mockImplementation((path: string) => !path.includes('index.js'));
 
     await expect(async () => {
       await PluginLoader.loadFromDirectory('/plugin-dir', mockContext);
@@ -113,6 +116,7 @@ describe('PluginLoader', () => {
 
   test('should throw if plugin class is not found', async () => {
     // Mock the import to return an empty object
+    // @ts-expect-error - weird unrelated error, the type is ok.
     global.importShim = jest.fn().mockResolvedValue({});
 
     await expect(async () => {

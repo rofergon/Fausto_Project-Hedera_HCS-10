@@ -55,6 +55,10 @@ export interface ActiveConnection {
   isPending?: boolean;
   needsConfirmation?: boolean;
   profileInfo?: AgentProfileInfo;
+  metadata?: {
+    requestId?: number;
+    [key: string]: any;
+  };
 }
 
 /**

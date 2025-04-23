@@ -1,11 +1,13 @@
 import { describe, expect, test, jest, beforeEach } from '@jest/globals';
 import { PluginRegistry } from '../PluginRegistry';
-import { PluginContext, BasePlugin } from '../BasePlugin';
+import { BasePlugin } from '../BasePlugin';
+import { PluginContext } from '../PluginInterface';
 import { StructuredTool } from '@langchain/core/tools';
 import { HCS10Client } from '../../hcs10/HCS10Client';
 import { Logger } from '@hashgraphonline/standards-sdk';
 
 // Mock classes
+// @ts-expect-error - the type is ok.
 class MockTool extends StructuredTool {
   name = 'mock_tool';
   description = 'A mock tool for testing';

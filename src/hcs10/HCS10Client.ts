@@ -1,6 +1,7 @@
 import {
   TransactionReceipt,
   PrivateKey,
+  TopicMessageQuery,
 } from '@hashgraph/sdk';
 import {
   HCS10Client as StandardSDKClient,

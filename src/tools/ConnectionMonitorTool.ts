@@ -5,6 +5,7 @@ import {
   IStateManager,
   ActiveConnection,
   AgentProfileInfo,
+  ConnectionRequestInfo,
 } from '../state/state-types';
 import {
   Logger,
@@ -97,6 +98,7 @@ export class ConnectionMonitorTool extends StructuredTool {
   private isMonitoring: boolean = false;
   private listConnectionsTool: ListConnectionsTool;
   private static processedRequests = new Set<string>();
+  private activeConnectionMap = new Map<string, Map<number, ActiveConnection>>();
 
   constructor({
     hcsClient,
@@ -176,7 +178,6 @@ export class ConnectionMonitorTool extends StructuredTool {
       let acceptedConnections = 0;
       let skippedRequests = 0;
       const agentId = this.hcsClient.getAccountAndSigner().accountId;
-      const requestIdKey = (reqId: number) => `${agentId}:${reqId}`;
 
       while (Date.now() < endTime) {
         try {
@@ -185,13 +186,24 @@ export class ConnectionMonitorTool extends StructuredTool {
             showPending: false,
           });
           const currentConnections = this.stateManager.listConnections();
-          const connectedAccountIds = new Set(
-            currentConnections
-              .filter(
-                (conn) => conn.status === 'established' && !conn.isPending
-              )
-              .map((conn) => conn.targetAccountId)
-          );
+
+          // Create a map of connections by accountId and requestId to better track multiple connections
+          const connectionsByAccountAndRequest = new Map<string, Set<string>>();
+
+          currentConnections
+            .filter((conn) => conn.status === 'established' && !conn.isPending)
+            .forEach((conn) => {
+              if (!connectionsByAccountAndRequest.has(conn.targetAccountId)) {
+                connectionsByAccountAndRequest.set(conn.targetAccountId, new Set());
+              }
+
+              // If connection has a requestId, track it
+              if (conn.metadata?.requestId) {
+                connectionsByAccountAndRequest
+                  .get(conn.targetAccountId)
+                  ?.add(String(conn.metadata.requestId));
+              }
+            });
 
           const messagesResult = await this.hcsClient.getMessages(
             inboundTopicId
@@ -217,9 +229,9 @@ export class ConnectionMonitorTool extends StructuredTool {
             }
 
             connectionRequestsFound++;
+            const requestIdKey = `${agentId}:${requestId}`;
 
-            const reqKey = requestIdKey(requestId);
-            if (ConnectionMonitorTool.processedRequests.has(reqKey)) {
+            if (ConnectionMonitorTool.processedRequests.has(requestIdKey)) {
               this.logger.info(
                 `Request #${requestId} already processed, skipping`
               );
@@ -229,7 +241,7 @@ export class ConnectionMonitorTool extends StructuredTool {
 
             const requestorAccountId = this.extractAccountId(request);
             if (!requestorAccountId) {
-              ConnectionMonitorTool.processedRequests.add(reqKey);
+              ConnectionMonitorTool.processedRequests.add(requestIdKey);
               continue;
             }
 
@@ -240,11 +252,13 @@ export class ConnectionMonitorTool extends StructuredTool {
               continue;
             }
 
-            if (connectedAccountIds.has(requestorAccountId)) {
+            // Check if this specific request has already been processed
+            const existingAccountConnections = connectionsByAccountAndRequest.get(requestorAccountId);
+            if (existingAccountConnections?.has(String(requestId))) {
               this.logger.info(
-                `Already connected to ${requestorAccountId}, skipping request #${requestId}`
+                `Already processed connection request #${requestId} from ${requestorAccountId}, skipping`
               );
-              ConnectionMonitorTool.processedRequests.add(reqKey);
+              ConnectionMonitorTool.processedRequests.add(requestIdKey);
               skippedRequests++;
               continue;
             }
@@ -255,12 +269,12 @@ export class ConnectionMonitorTool extends StructuredTool {
                 requestorAccountId,
                 feeConfig
               );
-              ConnectionMonitorTool.processedRequests.add(reqKey);
+              ConnectionMonitorTool.processedRequests.add(requestIdKey);
 
               if (result.success) {
                 acceptedConnections++;
                 this.logger.info(
-                  `Successfully accepted connection with ${requestorAccountId}`
+                  `Successfully accepted connection with ${requestorAccountId} for request #${requestId}`
                 );
               }
             } else {
@@ -427,6 +441,9 @@ export class ConnectionMonitorTool extends StructuredTool {
         profileInfo,
         created: new Date(),
         status: 'established',
+        metadata: {
+          requestId: connectionRequestId
+        }
       };
 
       this.stateManager.addActiveConnection(newConnection);
@@ -491,5 +508,29 @@ export class ConnectionMonitorTool extends StructuredTool {
     }
 
     return feeString === ' with fees: ' ? '' : feeString;
+  }
+
+  /**
+   * Updates the tool's internal state with active connections from external source
+   */
+  public update(
+    connections: ActiveConnection[]
+  ): void {
+    // Update connection tracking map
+    this.activeConnectionMap.clear();
+    connections.forEach(connection => {
+      if (!connection.metadata?.requestId) {
+        return;
+      }
+
+      if (!this.activeConnectionMap.has(connection.targetAccountId)) {
+        this.activeConnectionMap.set(connection.targetAccountId, new Map());
+      }
+
+      this.activeConnectionMap.get(connection.targetAccountId)?.set(
+        connection.metadata.requestId,
+        connection
+      );
+    });
   }
 }

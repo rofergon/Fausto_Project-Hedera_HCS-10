@@ -1,4 +1,4 @@
-import { updateEnvFile } from '../../examples/utils';
+import { updateEnvFile } from '../utils/state-tools';
 import {
   RegisteredAgent,
   ActiveConnection,

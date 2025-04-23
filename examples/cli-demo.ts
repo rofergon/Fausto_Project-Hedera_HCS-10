@@ -15,11 +15,12 @@ import readline from 'readline';
 import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { updateEnvFile } from './utils';
+import { updateEnvFile } from '../src/utils/state-tools';
 // Import plugin system components
-import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
+import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
+import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
 import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
@@ -599,10 +600,14 @@ async function initiateConnection() {
           !c.needsConfirmation
       )
   ) {
-    console.log(
-      `Already have an established connection with ${targetAccountId}.`
+    console.warn(
+      `You already have an established connection with ${targetAccountId}. Are you sure you want to initiate a new connection?`
     );
-    return;
+    const confirm = await question('(y/n): ');
+    if (confirm.toLowerCase() !== 'y') {
+      console.log('Connection initiation canceled.');
+      return;
+    }
   }
 
   try {
@@ -1466,12 +1471,14 @@ async function main() {
       // Load and register plugins
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
+      const hbarPricePlugin = new HbarPricePlugin();
 
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
+      await pluginRegistry.registerPlugin(hbarPricePlugin);
 
       console.log('Plugin system initialized successfully!');
-      console.log('Weather and DeFi plugins loaded automatically.');
+      console.log('Weather, DeFi, and HBAR Price plugins loaded automatically.');
 
       if (!weatherApiKey) {
         console.log(

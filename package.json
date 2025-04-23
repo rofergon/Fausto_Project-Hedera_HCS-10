@@ -1,14 +1,17 @@
 {
   "name": "@hashgraphonline/standards-agent-kit",
-  "version": "0.0.18",
+  "version": "0.0.20",
   "description": "A modular SDK for building on-chain autonomous agents using Hashgraph Online Standards, including HCS-10 for agent discovery and communication.",
   "type": "module",
-  "main": "./dist/index.es.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.es.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.es.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js",
+      "default": "./dist/index.es.js"
     }
   },
   "files": [
@@ -27,7 +30,8 @@
     "langchain-demo": "tsx examples/langchain-demo.ts",
     "plugin-demo": "tsx examples/plugin-system-example.ts",
     "plugin-weather": "tsx examples/plugins/weather/index.ts",
-    "plugin-defi": "tsx examples/plugins/defi/index.ts"
+    "plugin-defi": "tsx examples/plugins/defi/index.ts",
+    "standards-expert": "tsx examples/standards-expert/cli.ts"
   },
   "keywords": [
     "hedera",
@@ -71,23 +75,32 @@
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.62.0",
-    "@hashgraphonline/standards-sdk": "0.0.73",
-    "@langchain/community": "^0.3.37",
-    "@langchain/openai": "^0.5.1",
+    "@hashgraphonline/standards-sdk": "0.0.84",
+    "@langchain/community": "^0.3.41",
+    "@langchain/core": "^0.3.46",
+    "@langchain/openai": "^0.5.6",
     "@octokit/rest": "^21.1.1",
-    "dotenv": "^16.4.1",
-    "langchain": "^0.3.19",
+    "axios": "^1.6.8",
+    "chromadb": "^1.6.0",
+    "commander": "^11.1.0",
+    "dotenv": "^16.4.5",
+    "langchain": "^0.3.23",
+    "libsodium-wrappers": "^0.7.13",
+    "node-llama-cpp": "^2.8.3",
     "openai": "^4.28.0",
+    "prompts": "^2.4.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@swc/core": "^1.11.21",
-    "@swc/jest": "^0.2.37",
-    "@types/jest": "^29.5.11",
-    "@types/node": "^20.11.16",
-    "@typescript-eslint/eslint-plugin": "^6.20.0",
-    "@typescript-eslint/parser": "^6.20.0",
+    "@swc/jest": "^0.2.36",
+    "@types/jest": "^29.5.12",
+    "@types/libsodium-wrappers": "^0.7.14",
+    "@types/node": "^20.11.30",
+    "@typescript-eslint/eslint-plugin": "^7.3.1",
+    "@typescript-eslint/parser": "^7.3.1",
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
