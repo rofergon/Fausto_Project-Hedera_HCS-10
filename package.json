@@ -31,7 +31,8 @@
     "plugin-demo": "tsx examples/plugin-system-example.ts",
     "plugin-weather": "tsx examples/plugins/weather/index.ts",
     "plugin-defi": "tsx examples/plugins/defi/index.ts",
-    "standards-expert": "tsx examples/standards-expert/cli.ts"
+    "standards-agent:start": "tsx examples/standards-expert/cli.ts -- start",
+    "standards-agent:process-docs": "tsx examples/standards-expert/cli.ts -- process-docs --all-repos"
   },
   "keywords": [
     "hedera",
@@ -75,7 +76,7 @@
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.62.0",
-    "@hashgraphonline/standards-sdk": "0.0.84",
+    "@hashgraphonline/standards-sdk": "0.0.91",
     "@langchain/community": "^0.3.41",
     "@langchain/core": "^0.3.46",
     "@langchain/openai": "^0.5.6",

@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { IStateManager, ActiveConnection } from '../state/state-types';
 import { Logger, FeeConfigBuilder } from '@hashgraphonline/standards-sdk';
-import { ManageConnectionRequestsTool } from './ManageConnectionRequestsTool';
 
 export interface AcceptConnectionRequestToolParams extends ToolParams {
   hcsClient: HCS10Client;
@@ -18,10 +17,10 @@ export class AcceptConnectionRequestTool extends StructuredTool {
   description =
     'Accepts a specific pending connection request from another agent, establishing a communication channel.';
   schema = z.object({
-    requestId: z
-      .number()
+    requestKey: z
+      .string()
       .describe(
-        'The ID of the specific request to accept. Use the "manage_connection_requests" tool with action="list" first to get valid IDs.'
+        'The unique request key of the specific request to accept. Use the "manage_connection_requests" tool with action="list" first to get valid keys.'
       ),
     hbarFee: z
       .number()
@@ -55,7 +54,7 @@ export class AcceptConnectionRequestTool extends StructuredTool {
   }
 
   protected async _call({
-    requestId,
+    requestKey,
     hbarFee,
     exemptAccountIds,
   }: z.infer<this['schema']>): Promise<string> {
@@ -64,16 +63,33 @@ export class AcceptConnectionRequestTool extends StructuredTool {
       return 'Error: Cannot accept connection request. No agent is currently active. Please register or select an agent first.';
     }
 
-    const manageConnectionRequestsTool = new ManageConnectionRequestsTool({
-      hcsClient: this.hcsClient,
-      stateManager: this.stateManager,
-    });
+    const connectionsManager = this.stateManager.getConnectionsManager();
+    if (!connectionsManager) {
+      return 'Error: ConnectionsManager not initialized';
+    }
 
-    await manageConnectionRequestsTool.refreshRequests();
+    await connectionsManager.fetchConnectionData(currentAgent.accountId);
 
-    const request = this.stateManager.getConnectionRequestById(requestId);
+    // Find the request with the matching unique key or fallback to sequence number
+    const allRequests = [
+      ...connectionsManager.getPendingRequests(),
+      ...connectionsManager.getConnectionsNeedingConfirmation()
+    ];
+
+    const request = allRequests.find(
+      (r) => (r.uniqueRequestKey === requestKey) ||
+        (r.connectionRequestId?.toString() === requestKey) ||
+        (r.inboundRequestId?.toString() === requestKey)
+    );
+
     if (!request) {
-      return `Error: Request ID ${requestId} not found or no longer pending. Use the manage_connection_requests tool with action="list" to verify.`;
+      return `Error: Request with key ${requestKey} not found or no longer pending. Use the manage_connection_requests tool with action="list" to verify.`;
+    }
+
+    // Get the numeric request ID from the request for the SDK call
+    const numericRequestId = request.connectionRequestId || request.inboundRequestId;
+    if (!numericRequestId) {
+      return `Error: Could not determine a valid request ID for the request with key ${requestKey}.`;
     }
 
     try {
@@ -91,7 +107,7 @@ export class AcceptConnectionRequestTool extends StructuredTool {
 
           const finalExemptions = [
             ...(exemptAccountIds || []),
-            request.requestorId,
+            currentAgent.accountId,
           ];
           feeConfigBuilder.addHbarFee(hbarFee, collectorId, finalExemptions);
           this.logger.info(
@@ -110,17 +126,17 @@ export class AcceptConnectionRequestTool extends StructuredTool {
       }
 
       this.logger.info(
-        `Attempting to accept request ID: ${requestId} from ${request.requestorId}`
+        `Attempting to accept request Key: ${requestKey} (ID: ${numericRequestId}) from ${request.targetAccountId}`
       );
       const result = await this.hcsClient.handleConnectionRequest(
         inboundTopicId,
-        request.requestorId,
-        requestId,
+        request.targetAccountId,
+        numericRequestId,
         feeConfigBuilder
       );
 
       if (!result?.connectionTopicId) {
-        return `Error: Failed to accept connection request #${requestId}. The SDK did not return a connection topic ID.`;
+        return `Error: Failed to accept connection request with key ${requestKey}. The SDK did not return a connection topic ID.`;
       }
       this.logger.info(
         `Successfully created connection topic: ${result.connectionTopicId}`
@@ -130,48 +146,49 @@ export class AcceptConnectionRequestTool extends StructuredTool {
 
       let targetInboundTopic = '';
       try {
-        const targetProfileData = await this.hcsClient.getAgentProfile(
-          request.requestorId
-        );
+        const targetProfileData = await this.hcsClient.standardClient.retrieveProfile(request.targetAccountId);
         targetInboundTopic =
-          targetProfileData?.['topicInfo']?.['inboundTopic'] || '';
+          targetProfileData?.topicInfo?.inboundTopic || '';
         if (!targetInboundTopic) {
           this.logger.warn(
-            `Could not resolve target inbound topic for ${request.requestorId}`
+            `Could not resolve target inbound topic for ${request.targetAccountId}`
           );
         }
       } catch (e) {
         this.logger.warn(
-          `Error fetching target profile/topic for ${request.requestorId}: ${e}`
+          `Error fetching target profile/topic for ${request.targetAccountId}: ${e}`
         );
       }
 
+      const name = request.profileInfo?.display_name || request.profileInfo?.alias || `Agent ${request.targetAccountId}`;
       const newConnection: ActiveConnection = {
-        targetAccountId: request.requestorId,
-        targetAgentName: request.requestorName,
+        targetAccountId: request.targetAccountId,
+        targetAgentName: name,
         targetInboundTopicId: targetInboundTopic,
         connectionTopicId,
-        profileInfo: request.profile,
+        profileInfo: request.profileInfo,
         created: new Date(),
         status: 'established',
       };
 
       this.stateManager.addActiveConnection(newConnection);
-      this.stateManager.removeConnectionRequest(requestId);
-      this.logger.info(`Removed request ${requestId} from pending requests`);
+      connectionsManager.fetchConnectionData(request.targetAccountId);
+
+      this.logger.info(`Removed request ${requestKey} from pending requests`);
 
       let feeMessage = '';
       if (hbarFee && hbarFee > 0 && feeConfigBuilder) {
         feeMessage = ` with a ${hbarFee} HBAR fee per message`;
       }
 
-      return `Successfully accepted connection request #${requestId} from ${request.requestorName}${feeMessage}. Connection established on topic: ${connectionTopicId}.`;
+      const displayKey = request.uniqueRequestKey || requestKey;
+      return `Successfully accepted connection request ${displayKey} from ${name} ${feeMessage}. Connection established on topic: ${connectionTopicId}.`;
     } catch (error) {
       this.logger.error(
-        `Error accepting connection request #${requestId}: ${error}`
+        `Error accepting connection request ${requestKey}: ${error}`
       );
 
-      return `Error accepting connection request #${requestId}: ${
+      return `Error accepting connection request ${requestKey}: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }

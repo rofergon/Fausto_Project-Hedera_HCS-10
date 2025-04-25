@@ -5,13 +5,13 @@ import {
   IStateManager,
   ActiveConnection,
   AgentProfileInfo,
-  ConnectionRequestInfo,
 } from '../state/state-types';
 import {
   Logger,
   FeeConfigBuilder,
   HCSMessage,
   FeeConfigBuilderInterface,
+  AIAgentProfile,
 } from '@hashgraphonline/standards-sdk';
 import { ListConnectionsTool } from './ListConnectionsTool';
 
@@ -97,8 +97,6 @@ export class ConnectionMonitorTool extends StructuredTool {
   private logger: Logger;
   private isMonitoring: boolean = false;
   private listConnectionsTool: ListConnectionsTool;
-  private static processedRequests = new Set<string>();
-  private activeConnectionMap = new Map<string, Map<number, ActiveConnection>>();
 
   constructor({
     hcsClient,
@@ -177,7 +175,6 @@ export class ConnectionMonitorTool extends StructuredTool {
       let connectionRequestsFound = 0;
       let acceptedConnections = 0;
       let skippedRequests = 0;
-      const agentId = this.hcsClient.getAccountAndSigner().accountId;
 
       while (Date.now() < endTime) {
         try {
@@ -194,14 +191,16 @@ export class ConnectionMonitorTool extends StructuredTool {
             .filter((conn) => conn.status === 'established' && !conn.isPending)
             .forEach((conn) => {
               if (!connectionsByAccountAndRequest.has(conn.targetAccountId)) {
-                connectionsByAccountAndRequest.set(conn.targetAccountId, new Set());
+                connectionsByAccountAndRequest.set(
+                  conn.targetAccountId,
+                  new Set()
+                );
               }
 
-              // If connection has a requestId, track it
-              if (conn.metadata?.requestId) {
+              if (conn.connectionRequestId) {
                 connectionsByAccountAndRequest
                   .get(conn.targetAccountId)
-                  ?.add(String(conn.metadata.requestId));
+                  ?.add(String(conn.connectionRequestId));
               }
             });
 
@@ -229,9 +228,28 @@ export class ConnectionMonitorTool extends StructuredTool {
             }
 
             connectionRequestsFound++;
-            const requestIdKey = `${agentId}:${requestId}`;
 
-            if (ConnectionMonitorTool.processedRequests.has(requestIdKey)) {
+            // Get the inbound topic ID where this request was received
+            const inboundTopicId =
+              (await this.hcsClient.getInboundTopicId()) || '';
+
+            // Get ConnectionsManager from state manager
+            const connectionsManager =
+              this.stateManager.getConnectionsManager();
+            if (!connectionsManager) {
+              this.logger.error(
+                'ConnectionsManager not initialized in state manager'
+              );
+              continue;
+            }
+
+            // Check if we've already processed this specific request
+            if (
+              connectionsManager.isConnectionRequestProcessed(
+                inboundTopicId,
+                requestId
+              )
+            ) {
               this.logger.info(
                 `Request #${requestId} already processed, skipping`
               );
@@ -241,7 +259,11 @@ export class ConnectionMonitorTool extends StructuredTool {
 
             const requestorAccountId = this.extractAccountId(request);
             if (!requestorAccountId) {
-              ConnectionMonitorTool.processedRequests.add(requestIdKey);
+              // Mark as processed even if we couldn't extract the account ID
+              connectionsManager.markConnectionRequestProcessed(
+                inboundTopicId,
+                requestId
+              );
               continue;
             }
 
@@ -253,12 +275,16 @@ export class ConnectionMonitorTool extends StructuredTool {
             }
 
             // Check if this specific request has already been processed
-            const existingAccountConnections = connectionsByAccountAndRequest.get(requestorAccountId);
+            const existingAccountConnections =
+              connectionsByAccountAndRequest.get(requestorAccountId);
             if (existingAccountConnections?.has(String(requestId))) {
               this.logger.info(
                 `Already processed connection request #${requestId} from ${requestorAccountId}, skipping`
               );
-              ConnectionMonitorTool.processedRequests.add(requestIdKey);
+              connectionsManager.markConnectionRequestProcessed(
+                inboundTopicId,
+                requestId
+              );
               skippedRequests++;
               continue;
             }
@@ -269,7 +295,10 @@ export class ConnectionMonitorTool extends StructuredTool {
                 requestorAccountId,
                 feeConfig
               );
-              ConnectionMonitorTool.processedRequests.add(requestIdKey);
+              connectionsManager.markConnectionRequestProcessed(
+                inboundTopicId,
+                requestId
+              );
 
               if (result.success) {
                 acceptedConnections++;
@@ -410,18 +439,13 @@ export class ConnectionMonitorTool extends StructuredTool {
         `Connection established! Topic ID: ${connectionTopicId}`
       );
 
-      let profileInfo: AgentProfileInfo | undefined;
+      let profileInfo: AIAgentProfile | undefined;
       try {
         const profile = await this.hcsClient.getAgentProfile(
           requestingAccountId
         );
         if (profile.success && profile.profile) {
-          profileInfo = {
-            name: profile.profile.display_name || profile.profile.alias,
-            bio: profile.profile.bio,
-            avatar: profile.profile.profileImage,
-            type: profile.profile.type,
-          };
+          profileInfo = profile.profile;
         }
       } catch (profileError) {
         this.logger.warn(
@@ -433,20 +457,21 @@ export class ConnectionMonitorTool extends StructuredTool {
         (await this.hcsClient.getAgentProfile(requestingAccountId))?.topicInfo
           ?.inboundTopic || '';
 
-      const newConnection: ActiveConnection = {
+      const connection: ActiveConnection = {
         targetAccountId: requestingAccountId,
-        targetAgentName: profileInfo?.name || `Agent ${requestingAccountId}`,
+        targetAgentName:
+          profileInfo?.display_name || `Agent ${requestingAccountId}`,
         targetInboundTopicId,
         connectionTopicId,
         profileInfo,
         created: new Date(),
         status: 'established',
         metadata: {
-          requestId: connectionRequestId
-        }
+          requestId: connectionRequestId,
+        },
       };
 
-      this.stateManager.addActiveConnection(newConnection);
+      this.stateManager.addActiveConnection(connection);
 
       return {
         success: true,
@@ -511,26 +536,19 @@ export class ConnectionMonitorTool extends StructuredTool {
   }
 
   /**
-   * Updates the tool's internal state with active connections from external source
+   * Updates the ConnectionsManager with latest connection data
+   * This method is meant to be called when changes to connections happen
+   * outside this tool's monitoring process
    */
-  public update(
-    connections: ActiveConnection[]
-  ): void {
-    // Update connection tracking map
-    this.activeConnectionMap.clear();
-    connections.forEach(connection => {
-      if (!connection.metadata?.requestId) {
-        return;
-      }
-
-      if (!this.activeConnectionMap.has(connection.targetAccountId)) {
-        this.activeConnectionMap.set(connection.targetAccountId, new Map());
-      }
-
-      this.activeConnectionMap.get(connection.targetAccountId)?.set(
-        connection.metadata.requestId,
-        connection
-      );
-    });
+  public update(): void {
+    // Trigger the listConnectionsTool to refresh state data
+    this.listConnectionsTool
+      .invoke({
+        includeDetails: true,
+        showPending: true,
+      })
+      .catch((error) => {
+        this.logger.error(`Error updating connections: ${error}`);
+      });
   }
 }

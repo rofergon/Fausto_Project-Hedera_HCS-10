@@ -28,23 +28,25 @@ export class VectorStore {
   private embeddingFunction: OpenAIEmbeddingFunction;
   private config: VectorStoreConfig;
   private initialized = false;
-  private documents: Map<string, {document: string, metadata: Record<string, unknown>}> = new Map();
+  private documents: Map<
+    string,
+    { document: string; metadata: Record<string, unknown> }
+  > = new Map();
 
   constructor(config: VectorStoreConfig) {
     this.config = config;
-    
-    // Ensure the data directory exists
+
     const dataPath = path.resolve(config.path);
     if (!fs.existsSync(dataPath)) {
       fs.mkdirSync(dataPath, { recursive: true });
     }
 
-    // Use in-memory client with no path
-    this.client = new ChromaClient();
+    this.client = new ChromaClient({ path: 'http://localhost:8000' });
 
     this.embeddingFunction = new OpenAIEmbeddingFunction({
-      openai_api_key: this.config.openAiApiKey || process.env.OPENAI_API_KEY || '',
-      openai_model: 'text-embedding-ada-002'
+      openai_api_key:
+        this.config.openAiApiKey || process.env.OPENAI_API_KEY || '',
+      openai_model: 'text-embedding-ada-002',
     });
   }
 
@@ -57,24 +59,28 @@ export class VectorStore {
     }
 
     try {
-      // Get or create collection using proper in-memory configuration
-      console.log(`Initializing in-memory Chroma collection: ${this.config.namespace}-collection`);
-      this.client = new ChromaClient({ path: '' }); // Empty path for in-memory
+      console.log(
+        `Initializing in-memory Chroma collection: ${this.config.namespace}-collection`
+      );
+      this.client = new ChromaClient({ path: 'http://localhost:8000' });
 
       this.collection = await this.client.getOrCreateCollection({
         name: `${this.config.namespace}-collection`,
         embeddingFunction: this.embeddingFunction,
         metadata: {
-          description: 'Hedera Standards knowledge base'
-        }
+          description: 'Hedera Standards knowledge base',
+        },
       });
 
       this.initialized = true;
-      console.log(`Vector store initialized with collection: ${this.config.namespace}-collection`);
+      console.log(
+        `Vector store initialized with collection: ${this.config.namespace}-collection`
+      );
     } catch (error) {
-      console.error("Error initializing ChromaDB:", error);
-      // Fall back to simple in-memory storage
-      console.log("Falling back to simple in-memory document storage (no embeddings)");
+      console.error('Error initializing ChromaDB:', error);
+      console.log(
+        'Falling back to simple in-memory document storage (no embeddings)'
+      );
       this.initialized = true;
     }
   }
@@ -98,33 +104,99 @@ export class VectorStore {
       return;
     }
 
-    // Generate IDs if not provided
-    const documentIds = ids || documents.map((_, i) => `doc-${Date.now()}-${i}`);
-    
-    // Generate metadata if not provided
+    const documentIds =
+      ids || documents.map((_, i) => `doc-${Date.now()}-${i}`);
+
     const documentMetadata = metadata || documents.map(() => ({}));
+    const chromaMetadata = documentMetadata.map((m) => {
+      const converted: Record<string, string | number | boolean> = {};
+      for (const [key, value] of Object.entries(m)) {
+        if (value === null || value === undefined) {
+          continue;
+        }
+        if (
+          typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean'
+        ) {
+          converted[key] = value;
+        } else {
+          converted[key] = String(value);
+        }
+      }
+      return converted;
+    });
 
     try {
-      // Try using ChromaDB collection
       if (this.collection) {
-    await this.collection.add({
-      ids: documentIds,
-      documents,
-          metadatas: documentMetadata
-    });
+        const uniqueIds = new Set<string>();
+        const duplicates = new Set<string>();
+
+        documentIds.forEach((id) => {
+          if (uniqueIds.has(id)) {
+            duplicates.add(id);
+          } else {
+            uniqueIds.add(id);
+          }
+        });
+
+        if (duplicates.size > 0) {
+          console.warn(
+            `Found ${duplicates.size} duplicate IDs. De-duplicating before adding to ChromaDB.`
+          );
+
+          const uniqueDocs: string[] = [];
+          const uniqueDocIds: string[] = [];
+          const uniqueMetadata: Record<string, string | number | boolean>[] =
+            [];
+
+          const processedIds = new Set<string>();
+
+          for (let i = 0; i < documentIds.length; i++) {
+            const id = documentIds[i];
+            if (!processedIds.has(id)) {
+              processedIds.add(id);
+              uniqueDocs.push(documents[i]);
+              uniqueDocIds.push(id);
+              uniqueMetadata.push(chromaMetadata[i]);
+            } else {
+              console.warn(`Skipping duplicate document with ID: ${id}`);
+            }
+          }
+
+          await this.collection.add({
+            ids: uniqueDocIds,
+            documents: uniqueDocs,
+            metadatas: uniqueMetadata,
+          });
+
+          console.log(
+            `Added ${uniqueDocs.length} unique documents to ChromaDB (${
+              documents.length - uniqueDocs.length
+            } duplicates skipped)`
+          );
+        } else {
+          await this.collection.add({
+            ids: documentIds,
+            documents,
+            metadatas: chromaMetadata,
+          });
+        }
       }
     } catch (error) {
-      console.error("Error adding documents to ChromaDB, using in-memory fallback:", error);
+      console.error(
+        'Error adding documents to ChromaDB, using in-memory fallback:',
+        error
+      );
     }
 
-    // Store in our simple map as fallback
     for (let i = 0; i < documents.length; i++) {
       this.documents.set(documentIds[i], {
         document: documents[i],
-        metadata: documentMetadata[i]
+        metadata: documentMetadata[i],
       });
     }
-    
+
     console.log(`Added ${documents.length} documents to vector store`);
   }
 
@@ -140,62 +212,63 @@ export class VectorStore {
     }
 
     try {
-      // Try using ChromaDB collection for semantic search
       if (this.collection) {
         try {
-    const results = await this.collection.query({
-      queryTexts: [query],
-      nResults: limit,
-            include: ["documents", "metadatas", "distances"]
-    });
+          const results = await this.collection.query({
+            queryTexts: [query],
+            nResults: limit,
+            include: ['documents', 'metadatas', 'distances'] as any,
+          });
 
           if (results.ids.length && results.ids[0].length) {
-    const searchResults: SearchResult[] = [];
-    
-    for (let i = 0; i < results.ids[0].length; i++) {
-      const id = results.ids[0][i];
-      const document = results.documents?.[0]?.[i] as string;
-              const metadata = results.metadatas?.[0]?.[i] as Record<string, unknown>;
-      const distance = results.distances?.[0]?.[i] as number;
-      
-      // Convert distance to similarity score (1.0 is perfect match, 0.0 is no match)
-      // Distance is typically 0 (perfect match) to 2 (opposite vectors)
-      const score = 1 - distance / 2;
-      
-      searchResults.push({
-        id,
-        document,
-        metadata,
-                score
-      });
-    }
+            const searchResults: SearchResult[] = [];
+
+            for (let i = 0; i < results.ids[0].length; i++) {
+              const id = results.ids[0][i];
+              const document = results.documents?.[0]?.[i] as string;
+              const metadata = results.metadatas?.[0]?.[i] as Record<
+                string,
+                unknown
+              >;
+              const distance = results.distances?.[0]?.[i] as number;
+
+              const score = 1 - distance / 2;
+
+              searchResults.push({
+                id,
+                document,
+                metadata,
+                score,
+              });
+            }
             return searchResults;
           }
         } catch (error) {
-          console.error("Error querying ChromaDB, falling back to keyword search:", error);
+          console.error(
+            'Error querying ChromaDB, falling back to keyword search:',
+            error
+          );
         }
       }
     } catch (error) {
-      console.warn("Using fallback search method:", error);
+      console.warn('Using fallback search method:', error);
     }
 
-    // Fallback to simple keyword search using our in-memory map
-    console.log("Using simple keyword search (ChromaDB not available)");
+    console.log('Using simple keyword search (ChromaDB not available)');
     const results: SearchResult[] = [];
     const lowercaseQuery = query.toLowerCase();
-    
-    for (const [id, data] of this.documents.entries()) {
-      // Simple keyword match - could be improved with more sophisticated text matching
+
+    for (const [id, data] of Array.from(this.documents.entries())) {
       if (data.document.toLowerCase().includes(lowercaseQuery)) {
         results.push({
           id,
           document: data.document,
           metadata: data.metadata,
-          score: 0.5 // Default score for keyword matches
+          score: 0.5,
         });
       }
     }
-    
+
     return results.slice(0, limit);
   }
 
@@ -214,22 +287,20 @@ export class VectorStore {
   public async deleteAll(): Promise<void> {
     if (this.collection) {
       try {
-    await this.collection.delete();
-    
-    // Recreate the collection
-    this.collection = await this.client.getOrCreateCollection({
-      name: `${this.config.namespace}-collection`,
-      embeddingFunction: this.embeddingFunction,
-      metadata: {
-            description: 'Hedera Standards knowledge base'
-          }
-    });
+        await this.collection.delete();
+
+        this.collection = await this.client.getOrCreateCollection({
+          name: `${this.config.namespace}-collection`,
+          embeddingFunction: this.embeddingFunction,
+          metadata: {
+            description: 'Hedera Standards knowledge base',
+          },
+        });
       } catch (error) {
-        console.error("Error deleting documents from ChromaDB:", error);
+        console.error('Error deleting documents from ChromaDB:', error);
       }
     }
-    
-    // Clear our in-memory map
+
     this.documents.clear();
   }
-} 
+}

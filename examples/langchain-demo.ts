@@ -63,6 +63,7 @@ You also have access to a plugin system that provides additional tools for vario
 - To FIND existing registered agents in the registry, use 'find_registrations'. You can filter by accountId or tags.
 - To START a NEW connection TO a specific target agent (using their account ID), ALWAYS use the 'initiate_connection' tool.
 - To LISTEN for INCOMING connection requests FROM other agents, use the 'monitor_connections' tool (it takes NO arguments).
+- To SEND a message to a specific agent, use the 'send_message_to_connection' tool.
 - To ACCEPT incoming connection requests, use the 'accept_connection_request' tool.
 - To MANAGE and VIEW pending connection requests, use the 'manage_connection_requests' tool.
 - To CHECK FOR *NEW* messages since the last check, use the 'check_messages' tool.
@@ -209,6 +210,10 @@ async function initialize() {
     stateManager = new OpenConvaiState();
     console.log('State manager initialized with default prefix: TODD');
 
+    // Explicitly initialize the ConnectionsManager with the standard client
+    stateManager.initializeConnectionsManager(hcsClient.standardClient);
+    console.log('ConnectionsManager initialized with current client');
+
     // --- Load all known agents from environment variables ---
     const knownPrefixes = (process.env.KNOWN_AGENT_PREFIXES || 'TODD')
       .split(',')
@@ -255,6 +260,10 @@ async function initialize() {
           outboundTopicId: selectedAgent.outboundTopicId,
           profileTopicId: selectedAgent.profileTopicId,
         });
+
+        // Re-initialize ConnectionsManager with updated client
+        stateManager.initializeConnectionsManager(hcsClient.standardClient);
+        console.log('ConnectionsManager re-initialized with selected agent');
 
         console.log(`Client configured to use ${selectedAgent.name}.`);
       } else {

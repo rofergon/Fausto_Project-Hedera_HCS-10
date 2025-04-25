@@ -25,6 +25,7 @@ export class SendMessageToConnectionTool extends StructuredTool {
         "The account ID (e.g., 0.0.12345) of the target agent OR the connection number (e.g., '1', '2') from the 'list_connections' tool."
       ),
     message: z.string().describe('The text message content to send.'),
+    disableMonitoring: z.boolean().optional().default(false),
   });
 
   private hcsClient: HCS10Client;
@@ -45,6 +46,7 @@ export class SendMessageToConnectionTool extends StructuredTool {
   protected async _call({
     targetIdentifier,
     message,
+    disableMonitoring,
   }: z.infer<this['schema']>): Promise<string> {
     const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
@@ -79,7 +81,9 @@ export class SendMessageToConnectionTool extends StructuredTool {
         throw new Error('Failed to send message');
       }
 
-      this.logger.info(`Message sent. Sequence Number: ${sequenceNumber}`);
+      if (!disableMonitoring) {
+        return `Message sent to ${targetAgentName} (${connection.targetAccountId}) via connection ${connectionTopicId}. Sequence Number: ${sequenceNumber}`;
+      }
 
       const replyBack = await this.monitorResponses(
         connectionTopicId,

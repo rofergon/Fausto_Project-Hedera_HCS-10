@@ -2,7 +2,7 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import { IStateManager } from '../state/state-types';
-import { Logger, HCSMessage } from '@hashgraphonline/standards-sdk';
+import { Logger } from '@hashgraphonline/standards-sdk';
 
 export interface ManageConnectionRequestsToolParams extends ToolParams {
   hcsClient: HCS10Client;
@@ -23,11 +23,11 @@ export class ManageConnectionRequestsTool extends StructuredTool {
       .describe(
         'The action to perform: list all requests, view details of a specific request, or reject a request'
       ),
-    requestId: z
-      .number()
+    requestKey: z
+      .string()
       .optional()
       .describe(
-        'The ID of the specific request to view or reject (required for view and reject actions)'
+        'The unique request key to view or reject (required for view and reject actions)'
       ),
   });
 
@@ -53,15 +53,15 @@ export class ManageConnectionRequestsTool extends StructuredTool {
 
   protected async _call({
     action,
-    requestId,
+    requestKey,
   }: z.infer<this['schema']>): Promise<string> {
     const currentAgent = this.stateManager.getCurrentAgent();
     if (!currentAgent) {
       return 'Error: Cannot manage connection requests. No agent is currently active. Please register or select an agent first.';
     }
 
-    if ((action === 'view' || action === 'reject') && requestId === undefined) {
-      return `Error: Request ID is required for the "${action}" action. Use the "list" action first to see available requests.`;
+    if ((action === 'view' || action === 'reject') && requestKey === undefined) {
+      return `Error: Request key is required for the "${action}" action. Use the "list" action first to see available requests.`;
     }
 
     try {
@@ -71,9 +71,9 @@ export class ManageConnectionRequestsTool extends StructuredTool {
         case 'list':
           return this.listRequests();
         case 'view':
-          return this.viewRequest(requestId!);
+          return this.viewRequest(requestKey!);
         case 'reject':
-          return this.rejectRequest(requestId!);
+          return this.rejectRequest(requestKey!);
         default:
           return `Error: Unsupported action: ${action}`;
       }
@@ -93,87 +93,19 @@ export class ManageConnectionRequestsTool extends StructuredTool {
     }
   }
 
-  public async refreshRequests(): Promise<void> {
+  private async refreshRequests(): Promise<void> {
     try {
-      const inboundTopicId = await this.hcsClient.getInboundTopicId();
-      const outboundTopicId = await this.hcsClient.getOutboundTopicId();
-      if (!inboundTopicId || !outboundTopicId) {
-        throw new Error(
-          'Could not find inbound or outbound topic ID for the current agent'
-        );
+      const { accountId } = this.hcsClient.getAccountAndSigner();
+      if (!accountId) {
+        throw new Error('Could not determine account ID for current agent');
       }
 
-      const outboundMessagesResult = await this.hcsClient.getMessages(
-        outboundTopicId
-      );
-      const outboundConfirmations = outboundMessagesResult.messages.filter(
-        (msg) => msg.op === 'connection_created' && msg.connection_request_id
-      );
-      const confirmedRequestIds = new Set(
-        outboundConfirmations.map((conf) => conf.connection_request_id)
-      );
+      const connectionManager = this.stateManager.getConnectionsManager();
+      if (!connectionManager) {
+        throw new Error('ConnectionsManager not initialized');
+      }
 
-      const inboundMessagesResult = await this.hcsClient.getMessages(
-        inboundTopicId
-      );
-      const incomingRequests = inboundMessagesResult.messages.filter(
-        (msg) => msg.op === 'connection_request' && msg.sequence_number
-      );
-
-      this.stateManager.clearConnectionRequests();
-
-      const profilePromises = incomingRequests.map(async (request) => {
-        const requestId = request.sequence_number;
-        if (!requestId) {
-          return;
-        }
-
-        if (confirmedRequestIds.has(requestId)) {
-          return;
-        }
-
-        const requestorId = this.extractAccountId(request);
-        if (!requestorId) {
-          return;
-        }
-
-        let profile = undefined;
-        try {
-          const profileResult = await this.hcsClient.getAgentProfile(
-            requestorId
-          );
-          if (profileResult.success && profileResult.profile) {
-            profile = {
-              name:
-                profileResult.profile.display_name ||
-                profileResult.profile.alias,
-              bio: profileResult.profile.bio,
-              avatar: profileResult.profile.profileImage,
-              type: profileResult.profile.type,
-            };
-          }
-        } catch (profileError) {
-          this.logger.warn(
-            `Could not fetch profile for ${requestorId}: ${profileError}`
-          );
-        }
-
-        this.stateManager.addConnectionRequest({
-          id: requestId,
-          requestorId,
-          requestorName: profile?.name || `Agent ${requestorId}`,
-          timestamp: new Date(request.created || Date.now()),
-          memo: request.m,
-          profile,
-        });
-      });
-
-      await Promise.allSettled(profilePromises);
-      this.logger.info(
-        `Found ${
-          this.stateManager.listConnectionRequests().length
-        } pending connection requests`
-      );
+      await connectionManager.fetchConnectionData(accountId);
     } catch (error) {
       this.logger.error(`Error refreshing connection requests: ${error}`);
       throw error;
@@ -181,87 +113,163 @@ export class ManageConnectionRequestsTool extends StructuredTool {
   }
 
   private listRequests(): string {
-    const requests = this.stateManager.listConnectionRequests();
-    if (requests.length === 0) {
+    const connectionsManager = this.stateManager.getConnectionsManager();
+    if (!connectionsManager) {
+      return 'Error: ConnectionsManager not initialized';
+    }
+
+    const pendingRequests = connectionsManager.getPendingRequests();
+    const needsConfirmation =
+      connectionsManager.getConnectionsNeedingConfirmation();
+
+    const allRequests = [...pendingRequests, ...needsConfirmation];
+
+    if (allRequests.length === 0) {
+      console.log('No pending connection requests found.', allRequests);
       return 'No pending connection requests found.';
     }
 
-    let output = `Found ${requests.length} pending connection request(s):\n\n`;
-    const sortedRequests = [...requests].sort(
-      (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+    let output = `Found ${allRequests.length} pending connection request(s):\n\n`;
+    const sortedRequests = [...allRequests].sort(
+      (a, b) => b.created.getTime() - a.created.getTime()
     );
 
     sortedRequests.forEach((request, index) => {
-      output += `${index + 1}. Request ID: ${request.id}\n`;
-      output += `   From: ${request.requestorName} (${request.requestorId})\n`;
-      output += `   Received: ${request.timestamp.toLocaleString()}\n`;
+      // Create a display ID for the connection request
+      const requestType = request.needsConfirmation ? '🟠 Incoming' : '⚪️ Outgoing';
+      const requestIdDisplay = request.uniqueRequestKey ||
+        `${request.connectionRequestId || request.inboundRequestId || 'unknown'}`;
+
+      output += `${index + 1}. ${requestType} - Key: ${requestIdDisplay}\n`;
+      output += `   ${request.needsConfirmation ? 'From' : 'To'}: ${
+        request.targetAgentName || `Agent ${request.targetAccountId}`
+      } (${request.targetAccountId})\n`;
+      output += `   Sent/Rcvd: ${request.created.toLocaleString()}\n`;
+
       if (request.memo) {
         output += `   Memo: ${request.memo}\n`;
       }
+
+      if (request.profileInfo && request.profileInfo.bio) {
+        output += `   Bio: ${request.profileInfo.bio}\n`;
+      }
+
       output += '\n';
     });
 
     output +=
-      'To view more details about a request, use action="view" with the specific requestId.\n';
+      'To view more details about a request, use action="view" with the specific requestKey.\n';
     output +=
-      'To reject a request, use action="reject" with the specific requestId.';
+      'To reject a request, use action="reject" with the specific requestKey.';
     return output;
   }
 
-  private viewRequest(requestId: number): string {
-    const request = this.stateManager.getConnectionRequestById(requestId);
-    if (!request) {
-      return `Error: Request ID ${requestId} not found or no longer pending.`;
+  private viewRequest(requestKey: string): string {
+    const connectionsManager = this.stateManager.getConnectionsManager();
+    if (!connectionsManager) {
+      return 'Error: ConnectionsManager not initialized';
     }
 
-    let output = `Details for connection request #${requestId}:\n\n`;
-    output += `Requestor ID: ${request.requestorId}\n`;
-    output += `Requestor Name: ${request.requestorName}\n`;
-    output += `Received: ${request.timestamp.toLocaleString()}\n`;
+    const pendingRequests = connectionsManager.getPendingRequests();
+    const needsConfirmation =
+      connectionsManager.getConnectionsNeedingConfirmation();
+
+    const allRequests = [...pendingRequests, ...needsConfirmation];
+
+    // Find the request with the matching unique key or fallback to sequence number
+    const request = allRequests.find(
+      (r) =>
+        (r.uniqueRequestKey === requestKey) ||
+        (r.connectionRequestId?.toString() === requestKey) ||
+        (r.inboundRequestId?.toString() === requestKey)
+    );
+
+    if (!request) {
+      return `Error: Request with key ${requestKey} not found or no longer pending.`;
+    }
+
+    // Create a display ID for the connection request
+    const requestType = request.needsConfirmation ? 'Incoming' : 'Outgoing';
+    const uniqueKey = request.uniqueRequestKey ||
+      `${request.connectionRequestId || request.inboundRequestId || 'unknown'}`;
+
+    let output = `Details for ${requestType} connection request: ${uniqueKey}\n\n`;
+    output += `${request.needsConfirmation ? 'Requestor' : 'Target'} ID: ${request.targetAccountId}\n`;
+    output += `${request.needsConfirmation ? 'Requestor' : 'Target'} Name: ${
+      request.targetAgentName || `Agent ${request.targetAccountId}`
+    }\n`;
+    output += `Received: ${request.created.toLocaleString()}\n`;
 
     if (request.memo) {
       output += `Memo: ${request.memo}\n`;
     }
 
-    if (request.profile) {
+    if (request.profileInfo) {
       output += '\nAgent Profile Information:\n';
 
-      if (request.profile.name) {
-        output += `Name: ${request.profile.name}\n`;
+      if (request.profileInfo.display_name || request.profileInfo.alias) {
+        output += `Name: ${
+          request.profileInfo.display_name || request.profileInfo.alias
+        }\n`;
       }
 
-      if (request.profile.type) {
-        output += `Type: ${request.profile.type}\n`;
+      if (request.profileInfo.type !== undefined) {
+        output += `Type: ${request.profileInfo.type}\n`;
       }
 
-      if (request.profile.bio) {
-        output += `Bio: ${request.profile.bio}\n`;
+      if (request.profileInfo.bio) {
+        output += `Bio: ${request.profileInfo.bio}\n`;
       }
     }
 
     output += '\nActions:\n';
-    output += `- To reject this request: action="reject", requestId=${requestId}\n`;
+    output += `- To reject this request: action="reject", requestKey="${uniqueKey}"\n`;
     output +=
       'Use the separate "accept_connection_request" tool to accept requests.';
     return output;
   }
 
-  private async rejectRequest(requestId: number): Promise<string> {
-    const request = this.stateManager.getConnectionRequestById(requestId);
-    if (!request) {
-      return `Error: Request ID ${requestId} not found or no longer pending.`;
+  private async rejectRequest(requestKey: string): Promise<string> {
+    const connectionsManager = this.stateManager.getConnectionsManager();
+    if (!connectionsManager) {
+      return 'Error: ConnectionsManager not initialized';
     }
 
-    this.stateManager.removeConnectionRequest(requestId);
-    return `Connection request #${requestId} from ${request.requestorName} was rejected locally (removed from pending list).`;
-  }
+    const pendingRequests = connectionsManager.getPendingRequests();
+    const needsConfirmation =
+      connectionsManager.getConnectionsNeedingConfirmation();
 
-  private extractAccountId(request: HCSMessage): string | undefined {
-    if (request.operator_id) {
-      return this.hcsClient.standardClient.extractAccountFromOperatorId(
-        request.operator_id
+    const allRequests = [...pendingRequests, ...needsConfirmation];
+
+    // Find the request with the matching unique key or fallback to sequence number
+    const request = allRequests.find(
+      (r) =>
+        (r.uniqueRequestKey === requestKey) ||
+        (r.connectionRequestId?.toString() === requestKey) ||
+        (r.inboundRequestId?.toString() === requestKey)
+    );
+
+    if (!request) {
+      return `Error: Request with key ${requestKey} not found or no longer pending.`;
+    }
+
+    // Mark as processed in ConnectionsManager based on the appropriate ID
+    if (request.inboundRequestId) {
+      // For needs_confirmation requests
+      connectionsManager.markConnectionRequestProcessed(
+        request.targetInboundTopicId || '',
+        request.inboundRequestId
+      );
+    } else if (request.connectionRequestId) {
+      // For pending requests
+      connectionsManager.markConnectionRequestProcessed(
+        request.originTopicId || '',
+        request.connectionRequestId
       );
     }
-    return undefined;
+
+    return `Connection request from ${
+      request.targetAgentName || `Agent ${request.targetAccountId}`
+    } was rejected.`;
   }
 }

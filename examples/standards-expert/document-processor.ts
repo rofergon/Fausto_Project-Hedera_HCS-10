@@ -21,8 +21,8 @@ export interface DocumentProcessorConfig {
   chunkOverlap?: number;
   /** Whether to fetch documentation from GitHub (default: false) */
   useGitHub?: boolean;
-  /** GitHub repository for HCS standards (default: hashgraph-online/hcs-improvement-proposals) */
-  githubRepo?: string;
+  /** GitHub repositories to process */
+  githubRepos?: string[];
   /** GitHub branch to use (default: main) */
   githubBranch?: string;
   /** Number of hours to cache GitHub content (default: 24, 0 to disable) */
@@ -40,6 +40,8 @@ export interface ProcessedDocument {
     chunkIndex?: number;
     totalChunks?: number;
     fileName?: string;
+    repository?: string;
+    contentType?: string;
   };
 }
 
@@ -62,7 +64,7 @@ export class DocumentProcessor {
   private chunkSize: number;
   private chunkOverlap: number;
   private useGitHub: boolean;
-  private githubRepo: string;
+  private githubRepos: string[];
   private githubBranch: string;
   private cacheTtlHours: number;
   private cacheDir: string;
@@ -75,12 +77,15 @@ export class DocumentProcessor {
     this.chunkSize = config.chunkSize || 1000;
     this.chunkOverlap = config.chunkOverlap || 200;
     this.useGitHub = config.useGitHub || false;
-    this.githubRepo = config.githubRepo || 'hashgraph-online/hcs-improvement-proposals';
+    this.githubRepos = config.githubRepos || [
+      'hashgraph-online/hcs-improvement-proposals',
+      'hashgraph-online/standards-sdk',
+      'hashgraph-online/standards-agent-kit',
+    ];
     this.githubBranch = config.githubBranch || 'main';
     this.cacheTtlHours = config.cacheTtlHours ?? 24;
     this.cacheDir = path.join(this.docsPath, '.cache');
 
-    // Create cache directory if it doesn't exist
     if (this.useGitHub && this.cacheTtlHours > 0) {
       if (!fs.existsSync(this.cacheDir)) {
         fs.mkdirSync(this.cacheDir, { recursive: true });
@@ -96,26 +101,32 @@ export class DocumentProcessor {
     const processedDocs: ProcessedDocument[] = [];
 
     if (this.useGitHub) {
-      // Process documentation from GitHub
-      const docs = await this.processGitHubDocs();
-      processedDocs.push(...docs);
+      for (const repo of this.githubRepos) {
+        console.log(`Processing GitHub repository: ${repo}`);
+        try {
+          const docs = await this.processGitHubRepo(repo);
+          processedDocs.push(...docs);
+        } catch (error) {
+          console.error(`Error processing repository ${repo}:`, error);
+        }
+      }
     } else {
-      // Process documentation from local directory
       const filePaths = this.getDocumentFiles(this.docsPath);
-    for (const filePath of filePaths) {
-      const docs = await this.processFile(filePath);
-      processedDocs.push(...docs);
+      for (const filePath of filePaths) {
+        const docs = await this.processFile(filePath);
+        processedDocs.push(...docs);
       }
     }
 
-    // Store documents in vector store
     if (processedDocs.length) {
-      const documents = processedDocs.map(doc => doc.content);
-      const ids = processedDocs.map(doc => doc.id);
-      const metadata = processedDocs.map(doc => doc.metadata);
+      const documents = processedDocs.map((doc) => doc.content);
+      const ids = processedDocs.map((doc) => doc.id);
+      const metadata = processedDocs.map((doc) => doc.metadata);
 
       await this.vectorStore.addDocuments(documents, ids, metadata);
-      console.log(`Added ${processedDocs.length} document chunks to vector store.`);
+      console.log(
+        `Added ${processedDocs.length} document chunks to vector store.`
+      );
     }
   }
 
@@ -130,7 +141,9 @@ export class DocumentProcessor {
         Object.entries(cacheData).forEach(([key, value]) => {
           this.githubCache.set(key, value as GitHubCacheEntry);
         });
-        console.log(`Loaded ${this.githubCache.size} entries from GitHub cache.`);
+        console.log(
+          `Loaded ${this.githubCache.size} entries from GitHub cache.`
+        );
       }
     } catch (error) {
       console.warn('Failed to load GitHub cache from disk:', error);
@@ -155,64 +168,120 @@ export class DocumentProcessor {
   }
 
   /**
-   * Process documentation from GitHub repository
+   * Process documentation from a specific GitHub repository
    */
-  private async processGitHubDocs(): Promise<ProcessedDocument[]> {
-    console.log(`Fetching documentation from GitHub: ${this.githubRepo}`);
+  private async processGitHubRepo(repo: string): Promise<ProcessedDocument[]> {
+    console.log(`Fetching documentation from GitHub repository: ${repo}`);
     const processedDocs: ProcessedDocument[] = [];
 
     try {
-      // Fetch docs directory contents
-      const docsUrl = `https://api.github.com/repos/${this.githubRepo}/contents/docs?ref=${this.githubBranch}`;
-      const response = await this.fetchWithCache(docsUrl);
+      const docsUrl = `https://api.github.com/repos/${repo}/contents/docs?ref=${this.githubBranch}`;
+      let items: GitHubItem[] = [];
 
-      if (!Array.isArray(response)) {
-        console.error('Unexpected response format from GitHub API');
-        return processedDocs;
-      }
+      try {
+        const response = await this.fetchWithCache(docsUrl);
+        if (Array.isArray(response)) {
+          items = response as GitHubItem[];
+        }
+      } catch (error) {
+        console.log(
+          `No docs directory found in ${repo}, checking root directory`
+        );
 
-      // Process each file and subdirectory
-      for (const item of response as GitHubItem[]) {
-        if (item.type === 'file') {
-          // Check file extension
-          const ext = path.extname(item.name);
-          if (this.extensions.includes(ext) && item.download_url) {
-            // Process the file
-            const fileContent = await this.fetchGitHubFile(item.download_url);
-            if (fileContent) {
-              const docs = this.processGitHubFile(fileContent, item.name, item.path);
-              processedDocs.push(...docs);
-            }
-          }
-        } else if (item.type === 'dir') {
-          // Recursively process directories
-          const dirItems = await this.fetchWithCache(item.url) as GitHubItem[];
-          for (const dirItem of dirItems) {
-            if (dirItem.type === 'file') {
-              const ext = path.extname(dirItem.name);
-              if (this.extensions.includes(ext) && dirItem.download_url) {
-                const fileContent = await this.fetchGitHubFile(dirItem.download_url);
-                if (fileContent) {
-                  const docs = this.processGitHubFile(fileContent, dirItem.name, dirItem.path);
-                  processedDocs.push(...docs);
-                }
-              }
-            }
-          }
+        const rootUrl = `https://api.github.com/repos/${repo}/contents?ref=${this.githubBranch}`;
+        const rootResponse = await this.fetchWithCache(rootUrl);
+
+        if (Array.isArray(rootResponse)) {
+          items = rootResponse as GitHubItem[];
         }
       }
 
-      console.log(`Processed ${processedDocs.length} document chunks from GitHub.`);
+      for (const item of items) {
+        if (item.type === 'file') {
+          const ext = path.extname(item.name);
+          if (
+            (this.extensions.includes(ext) ||
+              item.name.toLowerCase() === 'readme.md') &&
+            item.download_url
+          ) {
+            const fileContent = await this.fetchGitHubFile(item.download_url);
+            if (fileContent) {
+              const docs = this.processGitHubFile(
+                fileContent,
+                item.name,
+                item.path,
+                repo
+              );
+              processedDocs.push(...docs);
+            }
+          }
+        } else if (
+          item.type === 'dir' &&
+          !item.path.includes('node_modules') &&
+          !item.path.includes('dist')
+        ) {
+          await this.processGitHubDirectory(item.url, repo, processedDocs);
+        }
+      }
 
-      // Save the cache after processing
+      console.log(
+        `Processed ${processedDocs.length} document chunks from ${repo}.`
+      );
+
       if (this.cacheTtlHours > 0) {
         this.saveCacheToDisk();
       }
 
       return processedDocs;
     } catch (error) {
-      console.error(`Error fetching documents from GitHub: ${error}`);
-      throw error;
+      console.error(
+        `Error fetching documents from GitHub repository ${repo}:`,
+        error
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Process a GitHub directory recursively
+   */
+  private async processGitHubDirectory(
+    url: string,
+    repo: string,
+    processedDocs: ProcessedDocument[]
+  ): Promise<void> {
+    try {
+      const items = (await this.fetchWithCache(url)) as GitHubItem[];
+
+      for (const item of items) {
+        if (item.type === 'file') {
+          const ext = path.extname(item.name);
+          if (
+            (this.extensions.includes(ext) ||
+              item.name.toLowerCase() === 'readme.md') &&
+            item.download_url
+          ) {
+            const fileContent = await this.fetchGitHubFile(item.download_url);
+            if (fileContent) {
+              const docs = this.processGitHubFile(
+                fileContent,
+                item.name,
+                item.path,
+                repo
+              );
+              processedDocs.push(...docs);
+            }
+          }
+        } else if (
+          item.type === 'dir' &&
+          !item.path.includes('node_modules') &&
+          !item.path.includes('dist')
+        ) {
+          await this.processGitHubDirectory(item.url, repo, processedDocs);
+        }
+      }
+    } catch (error) {
+      console.error(`Error processing GitHub directory ${url}:`, error);
     }
   }
 
@@ -220,95 +289,100 @@ export class DocumentProcessor {
    * Fetch with cache
    */
   private async fetchWithCache(url: string): Promise<unknown> {
-    // If caching is disabled, fetch directly
     if (this.cacheTtlHours <= 0) {
-      return axios.get(url).then(response => response.data);
+      return axios.get(url).then((response) => response.data);
     }
 
-    // Check cache
     const cached = this.githubCache.get(url);
     const now = Date.now();
     const cacheTtlMs = this.cacheTtlHours * 60 * 60 * 1000;
 
-    if (cached && (now - cached.timestamp) < cacheTtlMs) {
+    if (cached && now - cached.timestamp < cacheTtlMs) {
       return cached.data;
     }
 
-    // Fetch and update cache
     try {
       const response = await axios.get(url);
       this.githubCache.set(url, {
         data: response.data,
-        timestamp: now
+        timestamp: now,
       });
       return response.data;
     } catch (error) {
-      // If we got rate limited, sleep and retry once
       if (axios.isAxiosError(error) && error.response?.status === 403) {
-        console.warn('GitHub API rate limit hit, waiting 5 seconds before retry...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        console.warn(
+          'GitHub API rate limit hit, waiting 5 seconds before retry...'
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5000));
         const response = await axios.get(url);
         this.githubCache.set(url, {
           data: response.data,
-          timestamp: now
+          timestamp: now,
         });
         return response.data;
       }
-
       throw error;
     }
   }
 
   /**
-   * Fetch a GitHub directory contents
-   */
-  private async fetchGitHubDirectory(url: string): Promise<GitHubItem[]> {
-    try {
-      return await this.fetchWithCache(url) as GitHubItem[];
-    } catch (error) {
-      console.error(`Error fetching GitHub directory: ${error}`);
-      return [];
-    }
-  }
-
-  /**
-   * Fetch a file from GitHub
+   * Fetch a GitHub file contents
    */
   private async fetchGitHubFile(url: string): Promise<string | null> {
     try {
-      return await this.fetchWithCache(url) as string;
+      const response = await axios.get(url);
+      return response.data;
     } catch (error) {
-      console.error(`Error fetching GitHub file: ${error}`);
+      console.error(`Error fetching file ${url}:`, error);
       return null;
     }
   }
 
   /**
-   * Process a file from GitHub
+   * Process a GitHub file into document chunks
    */
-  private processGitHubFile(content: string, fileName: string, filePath: string): ProcessedDocument[] {
-    // Extract metadata
+  private processGitHubFile(
+    content: string,
+    fileName: string,
+    filePath: string,
+    repo = ''
+  ): ProcessedDocument[] {
+    console.log(`Processing GitHub file: ${filePath}`);
     const metadata = this.extractMetadata(content, fileName, filePath);
-
-    // Split content into chunks
     const chunks = this.splitIntoChunks(content);
 
+    metadata.repository = repo;
+
+    if (repo.includes('standards-sdk')) {
+      metadata.contentType = 'SDK';
+    } else if (repo.includes('standards-agent-kit')) {
+      metadata.contentType = 'Agent Kit';
+    } else if (repo.includes('hcs-improvement-proposals')) {
+      metadata.contentType = 'HCS Standard';
+    }
+
+    const repoPrefix = repo ? repo.replace(/hashgraph-online\//, '') : 'local';
+
     return chunks.map((chunk, index) => ({
-      id: `github-${filePath}-chunk-${index}`,
+      id: `${repoPrefix}-${filePath}-${index}`,
       content: chunk,
       metadata: {
         ...metadata,
         chunkIndex: index,
         totalChunks: chunks.length,
-        source: `github/${filePath}`
-      }
+      },
     }));
   }
 
   /**
-   * Get all documentation files in a directory
+   * Get all document files recursively from a directory
    */
   private getDocumentFiles(dirPath: string, fileList: string[] = []): string[] {
+    if (!fs.existsSync(dirPath)) {
+      console.warn(`Directory not found: ${dirPath}`);
+      return fileList;
+    }
+
     const files = fs.readdirSync(dirPath);
 
     for (const file of files) {
@@ -329,81 +403,119 @@ export class DocumentProcessor {
   }
 
   /**
-   * Process a single documentation file
+   * Process a local file into document chunks
    */
   private async processFile(filePath: string): Promise<ProcessedDocument[]> {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const fileName = path.basename(filePath);
-    const relativePath = path.relative(this.docsPath, filePath);
+    console.log(`Processing file: ${filePath}`);
 
-    // Extract metadata
-    const metadata = this.extractMetadata(content, fileName, relativePath);
-    // Split content into chunks
-    const chunks = this.splitIntoChunks(content);
-    return chunks.map((chunk, index) => ({
-      id: `${relativePath}-chunk-${index}`,
-      content: chunk,
-      metadata: {
-        ...metadata,
-        chunkIndex: index,
-        totalChunks: chunks.length,
-      }
-    }));
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const relativePath = path.relative(this.docsPath, filePath);
+      const fileName = path.basename(filePath);
+
+      const metadata = this.extractMetadata(content, fileName, relativePath);
+      const chunks = this.splitIntoChunks(content);
+
+      return chunks.map((chunk, index) => ({
+        id: `local-${relativePath.replace(/\\/g, '-')}-${index}`,
+        content: chunk,
+        metadata: {
+          ...metadata,
+          chunkIndex: index,
+          totalChunks: chunks.length,
+        },
+      }));
+    } catch (error) {
+      console.error(`Error processing file ${filePath}:`, error);
+      return [];
+    }
   }
 
   /**
-   * Extract metadata from file content
+   * Extract metadata from document content
    */
-  private extractMetadata(content: string, fileName: string, relativePath: string): {
+  private extractMetadata(
+    content: string,
+    fileName: string,
+    relativePath: string
+  ): {
     source: string;
     fileName: string;
     title?: string;
     standard?: string;
+    repository?: string;
+    contentType?: string;
   } {
     interface DocMetadata {
       source: string;
       fileName: string;
       title?: string;
       standard?: string;
+      repository?: string;
+      contentType?: string;
     }
 
     const metadata: DocMetadata = {
       source: relativePath,
-      fileName
+      fileName,
     };
 
-    // Try to extract the title from markdown
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    if (titleMatch && titleMatch[1]) {
+    const titleMatch = content.match(/^#\s+(.+?)$/m);
+    if (titleMatch) {
       metadata.title = titleMatch[1].trim();
     }
 
-    // Try to determine if this is a standards document (HCS-X)
-    const standardMatch = fileName.match(/^hcs-(\d+)/i) || content.match(/HCS-(\d+)/i);
-    if (standardMatch) {
-      metadata.standard = `HCS-${standardMatch[1]}`;
+    const hcsMatch = fileName.match(/^HCS-(\d+)/);
+    if (hcsMatch) {
+      metadata.standard = `HCS-${hcsMatch[1]}`;
     }
 
     return metadata;
   }
 
   /**
-   * Split content into chunks with overlap
+   * Split content into overlapping chunks
    */
   private splitIntoChunks(content: string): string[] {
     const chunks: string[] = [];
+
+    if (content.length <= this.chunkSize) {
+      chunks.push(content);
+      return chunks;
+    }
+
     let startIndex = 0;
 
     while (startIndex < content.length) {
-      const endIndex = Math.min(startIndex + this.chunkSize, content.length);
-      chunks.push(content.substring(startIndex, endIndex));
-      startIndex = endIndex - this.chunkOverlap;
-      // If we're near the end, don't create a tiny chunk
-      if (endIndex + this.chunkSize - this.chunkOverlap > content.length) {
+      const endIndex = startIndex + this.chunkSize;
+
+      if (endIndex >= content.length) {
+        chunks.push(content.slice(startIndex));
         break;
       }
+
+      let chunkEndIndex = endIndex;
+
+      const lastParagraphBreak = content.lastIndexOf('\n\n', endIndex);
+      if (
+        lastParagraphBreak > startIndex &&
+        lastParagraphBreak > endIndex - this.chunkSize / 2
+      ) {
+        chunkEndIndex = lastParagraphBreak + 2;
+      } else {
+        const lastSentenceBreak = content.lastIndexOf('. ', endIndex);
+        if (
+          lastSentenceBreak > startIndex &&
+          lastSentenceBreak > endIndex - this.chunkSize / 4
+        ) {
+          chunkEndIndex = lastSentenceBreak + 2;
+        }
+      }
+
+      chunks.push(content.slice(startIndex, chunkEndIndex));
+      startIndex = chunkEndIndex - this.chunkOverlap;
     }
 
     return chunks;
   }
-} 
+}

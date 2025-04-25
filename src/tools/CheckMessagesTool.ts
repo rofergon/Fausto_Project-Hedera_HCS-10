@@ -102,8 +102,8 @@ Use 'lastMessagesCount' to specify how many latest messages to retrieve (default
         });
         
         if (messagesToProcess.length > 0) {
-          latestTimestampNanos = messagesToProcess.reduce((maxTs, msg) => 
-             Math.max(maxTs, msg.timestamp * 1_000_000), 
+          latestTimestampNanos = messagesToProcess.reduce(
+            (maxTs, msg) => Math.max(maxTs, msg.timestamp * 1_000_000),
              lastProcessedTimestamp
           );
         }

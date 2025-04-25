@@ -5,17 +5,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { Command } from 'commander';
-import { initializeHCS10Client, HCS10Client } from '@hashgraphonline/standards-agent-kit';
+import { initializeHCS10Client, HCS10Client } from '../../src';
 import { AIAgentCapability } from '@hashgraphonline/standards-sdk';
 import { StandardsExpertAgent } from './standards-expert-agent';
 import { VectorStore } from './vector-store';
 import { DocumentProcessor } from './document-processor';
 import { OpenConvaiState } from '../../src/state/open-convai-state';
+import { Logger } from '@hashgraphonline/standards-sdk';
 
-// Load environment variables from .env file
 dotenv.config();
 
-// Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -41,7 +40,7 @@ program
     'Log level (debug, info, warn, error)',
     'info'
   )
-  .option('-m, --model <name>', 'OpenAI model to use', 'gpt-3.5-turbo')
+  .option('-m, --model <n>', 'OpenAI model to use', 'gpt-3.5-turbo')
   .action(async (options) => {
     try {
       const requiredEnvVars = [
@@ -86,7 +85,7 @@ program
           logLevel: options.logLevel,
         },
         createAllTools: true,
-        stateManager
+        stateManager,
       });
 
       const client = clientInstance as unknown as HCS10Client;
@@ -248,109 +247,52 @@ program
     'Number of hours to cache GitHub content (0 to disable)',
     '24'
   )
+  .option(
+    '--all-repos',
+    'Process all standard Hedera repositories (hcs-improvement-proposals, standards-sdk, standards-agent-kit)',
+    false
+  )
   .action(async (options) => {
     try {
-      const docsPath = options.docs;
-      const vectorStorePath = options.vectorStore;
-      const useGitHub = !options.localOnly;
-      const cacheTtlHours = parseInt(options.cacheTtl, 10);
-
-      if (options.localOnly && !fs.existsSync(docsPath)) {
-        console.error(
-          `Error: Documentation directory not found at ${docsPath}`
-        );
-        process.exit(1);
-      }
-
       if (!process.env.OPENAI_API_KEY) {
-        console.error(
-          'Error: OPENAI_API_KEY environment variable is required for document processing'
-        );
+        console.error('OPENAI_API_KEY environment variable is required');
         process.exit(1);
       }
 
       const vectorStore = new VectorStore({
-        path: vectorStorePath,
+        path: options.vectorStore,
         namespace: 'standards-expert',
         openAiApiKey: process.env.OPENAI_API_KEY,
       });
 
       await vectorStore.initialize();
 
-      const docProcessor = new DocumentProcessor({
+      const githubRepos = options.allRepos
+        ? [
+            'hashgraph-online/hcs-improvement-proposals',
+            'hashgraph-online/standards-sdk',
+            'hashgraph-online/standards-agent-kit',
+          ]
+        : [options.githubRepo];
+
+      const processor = new DocumentProcessor({
         vectorStore,
-        docsPath,
-        useGitHub,
-        githubRepo: options.githubRepo,
+        docsPath: options.docs,
+        useGitHub: !options.localOnly,
+        githubRepos,
         githubBranch: options.githubBranch,
-        cacheTtlHours,
+        cacheTtlHours: parseInt(options.cacheTtl),
       });
 
-      if (useGitHub) {
-        console.log(
-          `Fetching documentation from GitHub: ${options.githubRepo} (branch: ${options.githubBranch})`
-        );
-        if (cacheTtlHours > 0) {
-          console.log(
-            `Using GitHub content cache with TTL of ${cacheTtlHours} hours`
-          );
-        }
-      } else {
-        console.log(
-          `Processing documentation from local directory: ${docsPath}`
-        );
-      }
+      await processor.processAllDocuments();
 
-      try {
-        await docProcessor.processAllDocuments();
-        console.log('Documentation processing complete.');
-        console.log(`Vector store saved to ${vectorStorePath}`);
-      } catch (error) {
-        if (useGitHub) {
-          console.error('Error processing GitHub documentation:', error);
-
-          if (fs.existsSync(docsPath)) {
-            console.log(
-              `\nAttempting to fall back to local documentation at ${docsPath}`
-            );
-
-            const localDocProcessor = new DocumentProcessor({
-              vectorStore,
-              docsPath,
-              useGitHub: false,
-            });
-
-            try {
-              await localDocProcessor.processAllDocuments();
-              console.log(
-                'Local documentation processing complete (fallback successful).'
-              );
-              console.log(`Vector store saved to ${vectorStorePath}`);
-            } catch (localError) {
-              console.error(
-                'Error processing local documentation (fallback failed):',
-                localError
-              );
-              process.exit(1);
-            }
-          } else {
-            console.error(
-              'GitHub documentation fetch failed and no local fallback available.'
-            );
-            process.exit(1);
-          }
-        } else {
-          console.error('Error processing documentation:', error);
-          process.exit(1);
-        }
-      }
+      console.log('Documentation processing complete');
     } catch (error) {
-      console.error('Unexpected error:', error);
+      console.error('Error processing documentation:', error);
       process.exit(1);
     }
   });
 
-// PM2 ecosystem file command
 program
   .command('generate-pm2')
   .description('Generate PM2 ecosystem.config.js file')
@@ -401,8 +343,16 @@ program
   .command('register')
   .description('Register a new Standards Expert Agent on the Hedera network')
   .option('-n, --name <n>', 'Name of the agent', 'Standards Expert')
-  .option('-d, --description <text>', 'Description of the agent', 'This agent helps answer questions about Hedera Standards')
-  .option('-p, --picture <path>', 'Path to profile picture', path.join(__dirname, 'agent-logo.svg'))
+  .option(
+    '-d, --description <text>',
+    'Description of the agent',
+    'This agent helps answer questions about Hedera Standards'
+  )
+  .option(
+    '-p, --picture <path>',
+    'Path to profile picture',
+    path.join(__dirname, 'agent-logo.svg')
+  )
   .option(
     '-n, --network <network>',
     'Hedera network (mainnet, testnet, previewnet)',
@@ -454,7 +404,7 @@ program
           network: options.network,
         },
         createAllTools: true,
-        stateManager
+        stateManager,
       });
 
       const registerTool = tools.registerAgentTool!;
@@ -476,7 +426,9 @@ program
 
       const registrationParams: RegistrationParams = {
         name: options.name,
-        description: options.description || 'This agent helps answer questions about Hedera Standards',
+        description:
+          options.description ||
+          'This agent helps answer questions about Hedera Standards',
         capabilities,
         type: 'autonomous' as const,
         model: 'gpt-3.5-turbo',
@@ -544,10 +496,152 @@ program
     }
   });
 
-// Parse command line arguments
+program
+  .command('info')
+  .description(
+    'Display information about the current agent, connections, and state'
+  )
+  .option('-e, --env-file <path>', 'Path to .env file', '.env')
+  .action(async (options) => {
+    try {
+      const logger = new Logger({ module: 'app' });
+      const envPath = path.resolve(process.cwd(), options.envFile);
+
+      if (!fs.existsSync(envPath)) {
+        console.error(`Environment file not found: ${envPath}`);
+        console.error(
+          'Please create an .env file or specify a valid path with --env-file'
+        );
+        process.exit(1);
+      }
+
+      dotenv.config({ path: envPath });
+
+      const operatorId = process.env.AGENT_ACCOUNT_ID as string;
+      const operatorPrivateKey = process.env.AGENT_PRIVATE_KEY as string;
+      const inboundTopicId = process.env.AGENT_INBOUND_TOPIC_ID as string;
+      const outboundTopicId = process.env.AGENT_OUTBOUND_TOPIC_ID as string;
+
+      if (
+        !operatorId ||
+        !operatorPrivateKey ||
+        !inboundTopicId ||
+        !outboundTopicId
+      ) {
+        console.error('Missing required environment variables:');
+        if (!operatorId) {
+          console.error('- AGENT_ACCOUNT_ID');
+        }
+        if (!operatorPrivateKey) {
+          console.error('- AGENT_PRIVATE_KEY');
+        }
+        if (!inboundTopicId) {
+          console.error('- AGENT_INBOUND_TOPIC_ID');
+        }
+        if (!outboundTopicId) {
+          console.error('- AGENT_OUTBOUND_TOPIC_ID');
+        }
+        process.exit(1);
+      }
+
+      logger.info('State manager initialized');
+      const stateManager = new OpenConvaiState();
+
+      const client = new HCS10Client(
+        operatorId,
+        operatorPrivateKey,
+        'testnet',
+        { logLevel: 'info' }
+      );
+      logger.info(`HCS10Client initialized for ${operatorId} on testnet`);
+
+      stateManager.initializeConnectionsManager(client.standardClient);
+
+      stateManager.setCurrentAgent({
+        name: 'Standards Expert',
+        accountId: operatorId,
+        inboundTopicId,
+        outboundTopicId,
+        privateKey: operatorPrivateKey,
+      });
+
+      const agent = new StandardsExpertAgent({
+        client,
+        accountId: operatorId,
+        inboundTopicId,
+        outboundTopicId,
+        logLevel: 'info',
+      });
+
+      await agent.initialize();
+
+      const connectionsManager = stateManager.getConnectionsManager();
+
+      console.log('\n===== Agent Information =====');
+      console.log(`Account ID: ${operatorId}`);
+      console.log(`Inbound Topic: ${inboundTopicId}`);
+      console.log(`Outbound Topic: ${outboundTopicId}`);
+
+      console.log('\n===== Connections =====');
+      if (connectionsManager) {
+        await connectionsManager.fetchConnectionData(operatorId);
+
+        const allConnections = connectionsManager.getAllConnections();
+        console.log(`Total connections: ${allConnections.length}`);
+
+        if (allConnections.length > 0) {
+          console.log('\nActive connections:');
+          allConnections.forEach((conn, index) => {
+            console.log(
+              `\n[${index + 1}] ${conn.targetAgentName || conn.targetAccountId}`
+            );
+            console.log(`  Account ID: ${conn.targetAccountId}`);
+            console.log(`  Connection Topic: ${conn.connectionTopicId}`);
+            console.log(`  Status: ${conn.status}`);
+            console.log(`  Created: ${conn.created.toISOString()}`);
+            console.log(
+              `  Last Activity: ${
+                conn.lastActivity ? conn.lastActivity.toISOString() : 'N/A'
+              }`
+            );
+            if (conn.connectionRequestId) {
+              console.log(
+                `  Connection Request ID: ${conn.connectionRequestId}`
+              );
+            }
+            if (conn.inboundRequestId) {
+              console.log(`  Inbound Request ID: ${conn.inboundRequestId}`);
+            }
+            console.log(`  Processed: ${conn.processed ? 'Yes' : 'No'}`);
+          });
+        } else {
+          console.log('No active connections found.');
+        }
+
+        const pendingRequests = connectionsManager.getPendingRequests();
+        console.log(`\nPending requests: ${pendingRequests.length}`);
+        if (pendingRequests.length > 0) {
+          pendingRequests.forEach((req, index) => {
+            console.log(`\n[${index + 1}] Request to: ${req.targetAccountId}`);
+            console.log(
+              `  Request ID: ${req.connectionRequestId || req.inboundRequestId}`
+            );
+            console.log(`  Status: ${req.status}`);
+          });
+        }
+      } else {
+        console.log('ConnectionsManager not initialized in state manager');
+      }
+
+      process.exit(0);
+    } catch (error) {
+      console.error('Error getting agent info:', error);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
 
-// If no command is provided, show help
 if (!process.argv.slice(2).length) {
   program.outputHelp();
 }

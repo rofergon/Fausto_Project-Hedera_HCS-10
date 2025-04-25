@@ -61,7 +61,7 @@ async function pluginSystemExample(): Promise<void> {
     const weatherTool = tools.find(tool => tool.name === 'get_current_weather');
     if (weatherTool) {
       try {
-        const result = await weatherTool._call({
+        const result = await weatherTool.invoke({
           location: 'London, UK',
           unit: 'celsius'
         });
@@ -78,7 +78,7 @@ async function pluginSystemExample(): Promise<void> {
     const priceTool = tools.find(tool => tool.name === 'get_token_price');
     if (priceTool) {
       try {
-        const result = await priceTool._call({
+        const result = await priceTool.invoke({
           tokenId: '0.0.1234'
         });
         console.log('Result:', result);

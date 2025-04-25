@@ -2,7 +2,7 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import { IStateManager, ActiveConnection } from '../state/state-types';
 import { HCS10Client } from '../hcs10/HCS10Client';
-import { ConnectionsManager, Connection } from '@hashgraphonline/standards-sdk';
+import { Connection, Logger } from '@hashgraphonline/standards-sdk';
 
 export interface ListConnectionsToolParams extends ToolParams {
   stateManager: IStateManager;
@@ -32,12 +32,13 @@ export class ListConnectionsTool extends StructuredTool {
 
   private stateManager: IStateManager;
   private hcsClient?: HCS10Client;
-  private connectionsManager?: ConnectionsManager;
+  private logger: Logger;
 
   constructor({ stateManager, hcsClient, ...rest }: ListConnectionsToolParams) {
     super(rest);
     this.stateManager = stateManager;
     this.hcsClient = hcsClient;
+    this.logger = new Logger({ module: 'ListConnectionsTool' });
   }
 
   protected async _call(args: z.infer<this['schema']>): Promise<string> {
@@ -128,20 +129,19 @@ export class ListConnectionsTool extends StructuredTool {
       return this.stateManager.listConnections() as Connection[];
     }
 
-    if (!this.connectionsManager) {
-      this.connectionsManager = new ConnectionsManager({
-        baseClient: this.hcsClient.standardClient,
-        logLevel: 'error',
-      });
-    }
-
     try {
       const { accountId } = this.hcsClient.getAccountAndSigner();
       if (!accountId) {
         return this.stateManager.listConnections() as Connection[];
       }
 
-      const connections = await this.connectionsManager.fetchConnectionData(
+      const connectionManager = this.stateManager.getConnectionsManager();
+      if (!connectionManager) {
+        this.logger.error('ConnectionsManager not initialized');
+        return this.stateManager.listConnections() as Connection[];
+      }
+
+      const connections = await connectionManager.fetchConnectionData(
         accountId
       );
 
