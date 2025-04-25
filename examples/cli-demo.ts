@@ -15,11 +15,12 @@ import readline from 'readline';
 import { RegisterAgentTool } from '../src/tools/RegisterAgentTool';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { updateEnvFile } from './utils';
+import { updateEnvFile } from '../src/utils/state-tools';
 // Import plugin system components
-import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
+import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
+import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
 import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
@@ -599,10 +600,14 @@ async function initiateConnection() {
           !c.needsConfirmation
       )
   ) {
-    console.log(
-      `Already have an established connection with ${targetAccountId}.`
+    console.warn(
+      `You already have an established connection with ${targetAccountId}. Are you sure you want to initiate a new connection?`
     );
-    return;
+    const confirm = await question('(y/n): ');
+    if (confirm.toLowerCase() !== 'y') {
+      console.log('Connection initiation canceled.');
+      return;
+    }
   }
 
   try {
@@ -687,7 +692,6 @@ async function manageConnectionRequests() {
   let viewRequestId,
     acceptRequestId,
     rejectRequestId,
-    reqId,
     configureFees,
     hbarFeeStr,
     exemptAccountsInput;
@@ -706,14 +710,10 @@ async function manageConnectionRequests() {
     case '2':
       viewRequestId = await question('Enter request ID to view: ');
       try {
-        reqId = parseInt(viewRequestId.trim());
-        if (isNaN(reqId)) {
-          console.log('Invalid request ID format.');
-          break;
-        }
+
         const result = await manageTool.invoke({
           action: 'view',
-          requestId: reqId,
+          requestKey: viewRequestId,
         });
         console.log(result);
       } catch (error) {
@@ -724,11 +724,6 @@ async function manageConnectionRequests() {
     case '3':
       acceptRequestId = await question('Enter request ID to accept: ');
       try {
-        reqId = parseInt(acceptRequestId.trim());
-        if (isNaN(reqId)) {
-          console.log('Invalid request ID format.');
-          break;
-        }
 
         configureFees = await question(
           'Configure fees for this connection? (y/n): '
@@ -760,14 +755,14 @@ async function manageConnectionRequests() {
           }
 
           const result = await acceptTool.invoke({
-            requestId: reqId,
+            requestKey: acceptRequestId,
             hbarFee,
             exemptAccountIds: exemptIds,
           });
           console.log(result);
         } else {
           const result = await acceptTool.invoke({
-            requestId: reqId,
+            requestKey: acceptRequestId,
           });
           console.log(result);
         }
@@ -779,14 +774,9 @@ async function manageConnectionRequests() {
     case '4':
       rejectRequestId = await question('Enter request ID to reject: ');
       try {
-        reqId = parseInt(rejectRequestId.trim());
-        if (isNaN(reqId)) {
-          console.log('Invalid request ID format.');
-          break;
-        }
         const result = await manageTool.invoke({
           action: 'reject',
-          requestId: reqId,
+          requestKey: rejectRequestId,
         });
         console.log(result);
       } catch (error) {
@@ -1369,6 +1359,10 @@ async function main() {
     }
     connectionTool = initResult.tools.connectionTool;
 
+    // Explicitly initialize the ConnectionsManager
+    stateManager.initializeConnectionsManager(hcsClient.standardClient);
+    console.log('ConnectionsManager initialized with current client');
+
     // Initialize our ConnectionMonitorTool with the client
     connectionMonitorTool = new ConnectionMonitorTool({
       hcsClient: hcsClient,
@@ -1421,6 +1415,10 @@ async function main() {
         // Update the state manager and tools with the selected agent
         stateManager.setCurrentAgent(currentAgent);
 
+        // Re-initialize the ConnectionsManager with the new client
+        stateManager.initializeConnectionsManager(hcsClient.standardClient);
+        console.log('ConnectionsManager re-initialized with selected agent');
+
         // Recreate connection tools with the new client
         connectionTool = new ConnectionTool({
           client: hcsClient,
@@ -1466,12 +1464,14 @@ async function main() {
       // Load and register plugins
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
+      const hbarPricePlugin = new HbarPricePlugin();
 
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
+      await pluginRegistry.registerPlugin(hbarPricePlugin);
 
       console.log('Plugin system initialized successfully!');
-      console.log('Weather and DeFi plugins loaded automatically.');
+      console.log('Weather, DeFi, and HBAR Price plugins loaded automatically.');
 
       if (!weatherApiKey) {
         console.log(
@@ -1528,15 +1528,10 @@ async function acceptConnectionRequest() {
       return;
     }
 
-    const requestId = await question('Enter request ID to accept: ');
-    const reqId = parseInt(requestId.trim());
-    if (isNaN(reqId)) {
-      console.log('Invalid request ID format.');
-      return;
-    }
+    const requestKey = await question('Enter request key to accept: ');
 
     interface FeeParams {
-      requestId: number;
+      requestKey: string;
       defaultCollectorAccount?: string;
       hbarFees?: Array<{
         amount: number;
@@ -1550,7 +1545,7 @@ async function acceptConnectionRequest() {
       exemptAccountIds?: string[];
     }
 
-    const feeParams: FeeParams = { requestId: reqId };
+    const feeParams: FeeParams = { requestKey };
     const configureFees = await question(
       'Configure fees for this connection? (y/n): '
     );
@@ -1752,7 +1747,7 @@ async function acceptConnectionRequest() {
       const result = await acceptTool.invoke(feeParams);
       console.log(result);
     } else {
-      const result = await acceptTool.invoke({ requestId: reqId });
+      const result = await acceptTool.invoke({ requestKey });
       console.log(result);
     }
   } catch (error) {

@@ -1,3 +1,11 @@
+import {
+  HCS10BaseClient,
+  ConnectionsManager,
+  AIAgentProfile,
+  Connection,
+  IConnectionsManager,
+} from '@hashgraphonline/standards-sdk';
+
 /**
  * Basic registered agent information
  */
@@ -49,12 +57,16 @@ export interface ActiveConnection {
   targetAgentName: string;
   targetInboundTopicId: string;
   connectionTopicId: string;
+  connectionRequestId?: number;
   status?: ConnectionStatus;
   created?: Date;
   lastActivity?: Date;
   isPending?: boolean;
   needsConfirmation?: boolean;
-  profileInfo?: AgentProfileInfo;
+  profileInfo?: AIAgentProfile;
+  metadata?: {
+    [key: string]: unknown;
+  };
 }
 
 /**
@@ -137,33 +149,24 @@ export interface IStateManager {
   updateTimestamp(connectionTopicId: string, timestampNanos: number): void;
 
   /**
-   * Stores a connection request in the state.
-   */
-  addConnectionRequest(request: ConnectionRequestInfo): void;
-
-  /**
-   * Lists all pending connection requests.
-   */
-  listConnectionRequests(): ConnectionRequestInfo[];
-
-  /**
-   * Finds a connection request by its ID.
-   */
-  getConnectionRequestById(requestId: number): ConnectionRequestInfo | undefined;
-
-  /**
-   * Removes a connection request from the state.
-   */
-  removeConnectionRequest(requestId: number): void;
-
-  /**
-   * Clears all connection requests from the state.
-   */
-  clearConnectionRequests(): void;
-
-  /**
    * Persists agent data to storage
    * Implementation may vary depending on the state manager
    */
-  persistAgentData?(agent: RegisteredAgent, options?: AgentPersistenceOptions): Promise<void>;
+  persistAgentData?(
+    agent: RegisteredAgent,
+    options?: AgentPersistenceOptions
+  ): Promise<void>;
+
+  /**
+   * Initializes the ConnectionsManager with the provided client
+   * @param baseClient - The HCS10BaseClient instance to use
+   * @returns The initialized ConnectionsManager
+   */
+  initializeConnectionsManager(baseClient: HCS10BaseClient): IConnectionsManager;
+
+  /**
+   * Gets the ConnectionsManager instance
+   * @returns The ConnectionsManager instance or null if not initialized
+   */
+  getConnectionsManager(): IConnectionsManager | null;
 }

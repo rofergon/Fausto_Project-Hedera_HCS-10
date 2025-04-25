@@ -15,7 +15,7 @@ import { AcceptConnectionRequestTool } from './tools/AcceptConnectionRequestTool
 import { RetrieveProfileTool } from './tools/RetrieveProfileTool';
 import { ListUnapprovedConnectionRequestsTool } from './tools/ListUnapprovedConnectionRequestsTool';
 import { Logger } from '@hashgraphonline/standards-sdk';
-import { ENV_FILE_PATH } from '../examples/utils';
+import { ENV_FILE_PATH } from './utils/state-tools';
 
 export interface HCS10ClientConfig {
   operatorId?: string;

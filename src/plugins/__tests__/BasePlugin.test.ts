@@ -1,9 +1,10 @@
 import { describe, expect, test, jest, beforeEach } from '@jest/globals';
-import { BasePlugin, PluginContext } from '../BasePlugin';
+import { BasePlugin } from '../BasePlugin';
 import { StructuredTool } from '@langchain/core/tools';
 import { HCS10Client } from '../../hcs10/HCS10Client';
 import { Logger } from '@hashgraphonline/standards-sdk';
 import { z } from 'zod';
+import { PluginContext } from '../PluginInterface';
 
 // Mock tool class
 class MockTool extends StructuredTool {

@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import readline from 'readline';
 
-import { HCS10Client } from '@hashgraphonline/standards-agent-kit';
+import { HCS10Client } from '../src/hcs10/HCS10Client';
 
 import { ConnectionMonitorTool } from '../src/tools/ConnectionMonitorTool';
 import { AcceptConnectionRequestTool } from '../src/tools/AcceptConnectionRequestTool';
@@ -18,9 +18,10 @@ import { IStateManager } from '../src/state/state-types';
 import { OpenConvaiState } from '../src/state/open-convai-state';
 
 // Import plugin system components
-import { PluginRegistry, PluginContext, PluginLoader } from '../src/plugins';
+import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
+import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
 
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
@@ -32,6 +33,7 @@ import {
 } from '@langchain/core/prompts';
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { RetrieveProfileTool } from '../src/tools/RetrieveProfileTool';
+import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
@@ -54,16 +56,21 @@ Be concise and informative in your responses.
 You also have access to a plugin system that provides additional tools for various functionalities:
 - Weather tools: Get current weather and weather forecasts for locations
 - DeFi tools: Get token prices, check token balances, and simulate token swaps
+- Hedera tools: Get the current HBAR price
 
 *** IMPORTANT TOOL SELECTION RULES ***
 - To REGISTER a new agent, use 'register_agent'.
 - To FIND existing registered agents in the registry, use 'find_registrations'. You can filter by accountId or tags.
 - To START a NEW connection TO a specific target agent (using their account ID), ALWAYS use the 'initiate_connection' tool.
 - To LISTEN for INCOMING connection requests FROM other agents, use the 'monitor_connections' tool (it takes NO arguments).
+- To SEND a message to a specific agent, use the 'send_message_to_connection' tool.
 - To ACCEPT incoming connection requests, use the 'accept_connection_request' tool.
 - To MANAGE and VIEW pending connection requests, use the 'manage_connection_requests' tool.
+- To CHECK FOR *NEW* messages since the last check, use the 'check_messages' tool.
+- To GET THE *LATEST* MESSAGE(S) in a conversation, even if you might have seen them before, use the 'check_messages' tool and set the parameter 'fetchLatest: true'. You can optionally specify 'lastMessagesCount' to get more than one latest message (default is 1).
 - For WEATHER information, use the appropriate weather plugin tools.
 - For DeFi operations, use the appropriate DeFi plugin tools.
+- For the CURRENT HBAR PRICE, use the 'getHbarPrice' tool.
 - Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
@@ -203,6 +210,10 @@ async function initialize() {
     stateManager = new OpenConvaiState();
     console.log('State manager initialized with default prefix: TODD');
 
+    // Explicitly initialize the ConnectionsManager with the standard client
+    stateManager.initializeConnectionsManager(hcsClient.standardClient);
+    console.log('ConnectionsManager initialized with current client');
+
     // --- Load all known agents from environment variables ---
     const knownPrefixes = (process.env.KNOWN_AGENT_PREFIXES || 'TODD')
       .split(',')
@@ -250,6 +261,10 @@ async function initialize() {
           profileTopicId: selectedAgent.profileTopicId,
         });
 
+        // Re-initialize ConnectionsManager with updated client
+        stateManager.initializeConnectionsManager(hcsClient.standardClient);
+        console.log('ConnectionsManager re-initialized with selected agent');
+
         console.log(`Client configured to use ${selectedAgent.name}.`);
       } else {
         console.log('No agent selected. Using initial operator identity.');
@@ -266,33 +281,33 @@ async function initialize() {
 
     // --- Instantiate Tools as an Array, passing stateManager ---
     tools = [
-      new RegisterAgentTool(hcsClient),
-      new FindRegistrationsTool({ hcsClient }),
-      new InitiateConnectionTool({ hcsClient, stateManager }),
-      new ListConnectionsTool({ hcsClient, stateManager }),
+      new RegisterAgentTool(hcsClient as HCS10Client),
+      new FindRegistrationsTool({ hcsClient: hcsClient as HCS10Client }),
+      new InitiateConnectionTool({ hcsClient: hcsClient as HCS10Client, stateManager }),
+      new ListConnectionsTool({ hcsClient: hcsClient as HCS10Client, stateManager }),
       new SendMessageToConnectionTool({
-        hcsClient,
+        hcsClient: hcsClient as HCS10Client,
         stateManager,
       }),
-      new CheckMessagesTool({ hcsClient, stateManager }),
-      new SendMessageTool(hcsClient),
+      new CheckMessagesTool({ hcsClient: hcsClient as HCS10Client, stateManager }),
+      new SendMessageTool(hcsClient as HCS10Client),
       new ConnectionTool({
-        client: monitoringHcsClient,
+        client: monitoringHcsClient as HCS10Client,
         stateManager,
       }),
       new ConnectionMonitorTool({
-        hcsClient: monitoringHcsClient,
+        hcsClient: monitoringHcsClient as HCS10Client,
         stateManager,
       }),
       new ManageConnectionRequestsTool({
-        hcsClient,
+        hcsClient: hcsClient as HCS10Client,
         stateManager,
       }),
       new AcceptConnectionRequestTool({
-        hcsClient,
+        hcsClient: hcsClient as HCS10Client,
         stateManager,
       }),
-      new RetrieveProfileTool(hcsClient),
+      new RetrieveProfileTool(hcsClient as HCS10Client),
     ];
 
     connectionMonitor = tools.find(
@@ -308,39 +323,36 @@ async function initialize() {
     // Initialize plugin system
     try {
       console.log('Initializing plugin system...');
-      
-      // Create plugin context
+
+      // Create plugin context - Use Logger instance
       pluginContext = {
         client: hcsClient,
-        logger: {
-          info: console.log,
-          warn: console.warn,
-          error: console.error,
-          debug: console.debug,
-        },
+        logger: new Logger({ module: 'PluginSystem' }),
         config: {
           weatherApiKey: process.env.WEATHER_API_KEY,
         }
       };
-      
+
       // Initialize plugin registry
       pluginRegistry = new PluginRegistry(pluginContext);
-      
+
       // Load and register plugins
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
-      
+      const hbarPricePlugin = new HbarPricePlugin();
+
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
-      
+      await pluginRegistry.registerPlugin(hbarPricePlugin);
+
       console.log('Plugin system initialized successfully.');
-      
+
       // Get plugin tools and add them to the tools array
       const pluginTools = pluginRegistry.getAllTools();
       tools = [...tools, ...pluginTools];
-      
+
       console.log(`Added ${pluginTools.length} plugin tools to the agent's toolkit.`);
-      
+
       if (!process.env.WEATHER_API_KEY) {
         console.log('\nNote: Weather API key not found in environment variables.');
         console.log('Weather plugin tools will not function correctly without an API key.');
@@ -399,11 +411,15 @@ async function initialize() {
  * Initializes monitoring for connections with proper Promise handling
  */
 async function runMonitoring(): Promise<void> {
-  const monitoringPromises = [];
+  console.log('[DEBUG] Entering runMonitoring function...');
+
+  // Restore promise array logic for background initiation
+  const monitoringPromises: Promise<unknown>[] = [];
 
   if (connectionMonitor) {
     console.log('Attempting to start background connection monitoring...');
     try {
+      // Invoke and push promise without awaiting
       const monitorPromise = connectionMonitor.invoke({});
       monitoringPromises.push(monitorPromise);
 
@@ -416,20 +432,20 @@ async function runMonitoring(): Promise<void> {
             'Could not get inbound topic ID to start monitor:',
             err
           );
-          console.warn('Connection monitoring could not be started.');
+          console.warn('Connection monitoring (ConnectionTool) could not be started.');
         });
     } catch (err) {
-      console.error('Error initializing connection monitor:', err);
+       // Catch potential synchronous errors during invoke setup
+       console.error('Error setting up ConnectionTool monitoring:', err);
     }
-  } else {
-    console.warn('ConnectionTool instance not found, cannot monitor.');
   }
 
   if (connectionMonitorTool) {
     console.log(
-      'Attempting to start ConnectionMonitorTool with 300 second monitoring...'
+      'Attempting to start ConnectionMonitorTool...'
     );
     try {
+      // Invoke and push promise without awaiting
       const toolMonitorPromise = connectionMonitorTool.invoke({
         monitorDurationSeconds: 300,
         acceptAll: false,
@@ -443,20 +459,19 @@ async function runMonitoring(): Promise<void> {
           );
         })
         .catch((err) => {
-          console.error('Could not start ConnectionMonitorTool:', err);
+           console.error('Could not start ConnectionMonitorTool:', err);
         });
     } catch (err) {
-      console.error('Error initializing ConnectionMonitorTool:', err);
+       // Catch potential synchronous errors during invoke setup
+       console.error('Error setting up ConnectionMonitorTool monitoring:', err);
     }
   }
 
-  // Wait for all promises to settle (either resolve or reject)
+  // Restore Promise.allSettled to wait for initiation, not completion
   await Promise.allSettled(monitoringPromises);
 
-  // Add an additional delay to allow monitoring logs to complete
+  // Keep delay for log separation
   await new Promise((resolve) => setTimeout(resolve, 1500));
-
-  // Clear line to separate monitoring logs from chat
   console.log('\n----------------------------------------');
 }
 
@@ -464,6 +479,7 @@ async function runMonitoring(): Promise<void> {
  * Creates the LangChain agent with tools and memory
  */
 async function setupAgent() {
+  console.log('[DEBUG] Entering setupAgent function...'); // Add debug log
   const llm = new ChatOpenAI({
     apiKey: process.env.OPENAI_API_KEY!,
     modelName: 'gpt-4o',
@@ -512,6 +528,7 @@ async function chatLoop() {
 
   console.log("\nAgent ready. Type your message or 'exit' to quit.");
 
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     const userInput = await new Promise<string>((resolve) => {
       rl.question('You: ', resolve);
@@ -536,7 +553,13 @@ async function chatLoop() {
       console.log(`Agent: ${result.output}`);
     } catch (error) {
       console.error('Error during agent execution:', error);
-      console.log('Agent: Sorry, I encountered an error. Please try again.');
+      // Log the full error object for more details
+      if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+      console.log('Agent: Sorry, I encountered an error processing your request. Please try again.');
     }
   }
 }

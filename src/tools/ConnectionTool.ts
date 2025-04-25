@@ -51,7 +51,7 @@ export class ConnectionTool extends StructuredTool {
    * Initiates the connection request monitoring process in the background.
    * Gets the inbound topic ID from the configured client.
    */
-  async _call(_input: z.infer<typeof this.schema>): Promise<string> {
+  async _call(/* _input: z.infer<typeof this.schema> */): Promise<string> {
     // Get inboundTopicId from the client
     let inboundTopicId: string;
     try {
@@ -112,19 +112,39 @@ export class ConnectionTool extends StructuredTool {
       try {
         const messagesResult = await this.client.getMessages(inboundTopicId);
 
-        const connectionRequests = messagesResult.messages.filter(
+        const allMessages = messagesResult.messages;
+
+        const connectionRequests = allMessages.filter(
           (msg) =>
             msg.op === 'connection_request' &&
-            typeof msg.sequence_number === 'number' &&
-            msg.sequence_number > lastProcessedMessageSequence
+            typeof msg.sequence_number === 'number' // Keep filtering by sequence number if needed, or remove if checking existing confirmations is sufficient
+            // msg.sequence_number > lastProcessedMessageSequence // Temporarily remove or adjust this if checking confirmations is the primary method
         );
 
         for (const message of connectionRequests) {
+          // Update lastProcessedMessageSequence regardless of handling outcome to avoid re-checking handled/skipped messages in future loops
           lastProcessedMessageSequence = Math.max(
             lastProcessedMessageSequence,
-            message.sequence_number
+            message.sequence_number || 0 // Use 0 if sequence_number is undefined (though filter should prevent this)
           );
+
           const connectionRequestId = message.sequence_number;
+          if (!connectionRequestId) {
+             continue; // Skip if sequence number is missing
+          }
+
+          // --- Check if already handled ---
+          const alreadyHandled = allMessages.some(
+            (m) => m.op === 'connection_created' && m.connection_id === connectionRequestId
+          );
+
+          if (alreadyHandled) {
+            this.logger.debug(
+              `Connection request #${connectionRequestId} already handled (found connection_created). Skipping.`
+            );
+            continue; // Skip to the next request
+          }
+          // --- End Check ---
 
           // Extract requesting account ID from the message's operator_id field (topic@account)
           const senderOperatorId = message.operator_id || '';

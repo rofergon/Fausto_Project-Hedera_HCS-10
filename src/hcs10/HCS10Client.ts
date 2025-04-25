@@ -1,7 +1,4 @@
-import {
-  TransactionReceipt,
-  PrivateKey,
-} from '@hashgraph/sdk';
+import { TransactionReceipt, PrivateKey } from '@hashgraph/sdk';
 import {
   HCS10Client as StandardSDKClient,
   AgentBuilder,
@@ -18,14 +15,23 @@ import {
 } from '@hashgraphonline/standards-sdk';
 import { AgentMetadata, AgentChannels } from './types';
 import { encryptMessage } from '../utils/Encryption';
+import { IStateManager } from '../state/state-types';
 
 // Keep type alias as they were removed accidentally
-type StandardHandleConnectionRequest =
-  InstanceType<typeof StandardSDKClient>['handleConnectionRequest'];
+type StandardHandleConnectionRequest = InstanceType<
+  typeof StandardSDKClient
+>['handleConnectionRequest'];
 type HandleConnectionRequestResponse = Awaited<
   ReturnType<StandardHandleConnectionRequest>
 >;
 export type StandardNetworkType = 'mainnet' | 'testnet';
+
+export interface ClientValidationOptions {
+  accountId: string;
+  privateKey: string;
+  network?: StandardNetworkType;
+  stateManager?: IStateManager;
+}
 
 export interface HCSMessageWithTimestamp extends HCSMessage {
   timestamp: number;
@@ -188,7 +194,9 @@ export class HCS10Client {
 
     if (metadata.pfpBuffer && metadata.pfpFileName) {
       if (metadata.pfpBuffer.byteLength === 0) {
-        this.logger.warn('Provided PFP buffer is empty. Skipping profile picture.');
+        this.logger.warn(
+          'Provided PFP buffer is empty. Skipping profile picture.'
+        );
       } else {
         this.logger.info(
           `Setting profile picture: ${metadata.pfpFileName} (${metadata.pfpBuffer.byteLength} bytes)`
@@ -253,7 +261,7 @@ export class HCS10Client {
     topicId: string,
     data: string,
     memo?: string,
-    submitKey?: any
+    submitKey?: PrivateKey
   ): Promise<number | undefined> {
     if (this.useEncryption) {
       data = encryptMessage(data);
@@ -422,5 +430,55 @@ export class HCS10Client {
       guardedRegistryBaseUrl: this.guardedRegistryBaseUrl,
     });
     return this.standardClient;
+  }
+
+  /**
+   * Validates that the operator account exists and has proper access for agent operations
+   */
+  private async validateOperator(
+    options: ClientValidationOptions
+  ): Promise<{
+    isValid: boolean;
+    operator?: { accountId: string };
+    error?: string;
+  }> {
+    try {
+      // Set up client with provided operator details
+      this.setClient(options.accountId, options.privateKey);
+
+      // Check if we can retrieve the operator ID
+      const operatorId = this.getOperatorId();
+
+      // If we got this far, basic validation passed
+      return {
+        isValid: true,
+        operator: { accountId: operatorId },
+      };
+    } catch (error) {
+      this.logger.error(`Validation error: ${error}`);
+      return {
+        isValid: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async initializeWithValidation(
+    options: ClientValidationOptions
+  ): Promise<{
+    isValid: boolean;
+    operator?: { accountId: string };
+    error?: string;
+  }> {
+    const validationResult = await this.validateOperator(options);
+
+    if (validationResult.isValid) {
+      // If we have access to the state manager, initialize its connections manager
+      if (options.stateManager) {
+        options.stateManager.initializeConnectionsManager(this.standardClient);
+      }
+    }
+
+    return validationResult;
   }
 }

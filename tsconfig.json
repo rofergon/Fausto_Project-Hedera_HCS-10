@@ -1,19 +1,31 @@
 {
   "compilerOptions": {
     "declaration": true,
-    "outDir": "dist",
+    "outDir": "./dist",
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noImplicitAny": true,
-    "module": "esnext",
-    "target": "es5",
+    "module": "ESNext",
+    "target": "es2020",
     "jsx": "react",
     "allowJs": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "Bundler",
     "esModuleInterop": true,
-    "lib": ["es2015", "dom"]
+    "lib": ["es2020", "dom"],
+    "baseUrl": ".",
+    "rootDir": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "examples/*": ["examples/*"]
+    }
   },
-  "include": ["src/**/*", "examples/**/*", "tests/**/*"],
-  "exclude": ["**/*.test.ts", "**/*.spec.ts"]
+  "include": [
+    "src/**/*",
+    "examples/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

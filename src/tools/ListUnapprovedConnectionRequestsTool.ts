@@ -2,20 +2,13 @@ import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
   IStateManager,
-  ConnectionRequestInfo,
-  AgentProfileInfo,
 } from '../state/state-types';
 import { HCS10Client } from '../hcs10/HCS10Client';
 import {
   Logger,
-  HCSMessage,
-  HCS11Profile,
+  Connection,
 } from '@hashgraphonline/standards-sdk';
-import { fetchConnectionMap, ConnectionMap } from '../utils/connectionUtils';
 
-interface PendingRequest extends ConnectionRequestInfo {
-  status: 'needs_confirmation' | 'pending_outbound';
-}
 
 type ListPendingRequestsToolParams = ToolParams & {
   hcsClient: HCS10Client;
@@ -69,8 +62,7 @@ export class ListUnapprovedConnectionRequestsTool extends StructuredTool {
     }
 
     try {
-      const connectionMap = await fetchConnectionMap(this.hcsClient);
-      const pendingRequests = this.findAllPendingRequests(connectionMap);
+      const pendingRequests = await this.findAllPendingRequests();
       return this.formatRequestsList(pendingRequests, sortBy, limit);
     } catch (error) {
       this.logger.error(`Error in ${this.name}: ${error}`);
@@ -84,152 +76,28 @@ export class ListUnapprovedConnectionRequestsTool extends StructuredTool {
    * Processes the connection connectionMap to find all requests
    * that are not fully established (incoming unapproved and outgoing pending).
    */
-  private findAllPendingRequests(
-    connectionMap: ConnectionMap
-  ): PendingRequest[] {
-    const pending: PendingRequest[] = [];
-
-    for (const [reqSeqNum, request] of Array.from(
-      connectionMap.inboundRequests.entries()
-    )) {
-      if (connectionMap.confirmedRequestIds.has(reqSeqNum)) {
-        continue;
-      }
-
-      const requestorAccountId = this.extractAccountIdFromMessage(request);
-      if (!requestorAccountId) {
-        continue;
-      }
-
-      const alreadyEstablishedInbound = Array.from(
-        connectionMap.inboundConfirmations.values()
-      ).some((conf) => conf.connection_id === reqSeqNum);
-      if (alreadyEstablishedInbound) {
-        continue;
-      }
-
-      const existingConnections = this.stateManager.listConnections();
-      const alreadyConnectedState = existingConnections.some(
-        (conn) =>
-          conn.targetAccountId === requestorAccountId &&
-          conn.status === 'established' &&
-          !conn.isPending &&
-          !conn.needsConfirmation
-      );
-      if (alreadyConnectedState) {
-        continue;
-      }
-
-      const profile = connectionMap.profileMap.get(requestorAccountId);
-      const profileInfo = profile
-        ? this.mapSDKProfileToInfo(profile)
-        : undefined;
-
-      pending.push({
-        id: reqSeqNum,
-        requestorId: requestorAccountId,
-        requestorName: profileInfo?.name || `Agent ${requestorAccountId}`,
-        timestamp: new Date(request.created || Date.now()),
-        memo: request.m || '',
-        profile: profileInfo,
-        status: 'needs_confirmation',
-      });
+  private async findAllPendingRequests(): Promise<Connection[]> {
+    const connectionsManager = this.stateManager.getConnectionsManager();
+    if (!connectionsManager) {
+      return [];
+    }
+    const currentAgent = this.stateManager.getCurrentAgent();
+    if (!currentAgent) {
+      return [];
     }
 
-    for (const [reqSeqNum, request] of Array.from(
-      connectionMap.outboundRequests.entries()
-    )) {
-      const confirmedInbound =
-        connectionMap.inboundConfirmations.has(reqSeqNum);
-      const confirmedOutbound =
-        connectionMap.outboundConfirmations.has(reqSeqNum);
+    await connectionsManager.fetchConnectionData(currentAgent.accountId);
+    const pendingRequests = connectionsManager.getPendingRequests();
+    const connectionsNeedingConfirmation = connectionsManager.getConnectionsNeedingConfirmation();
 
-      if (confirmedInbound || confirmedOutbound) {
-        continue;
-      }
-
-      const targetAccountId = this.extractTargetAccountIdFromOutbound(request);
-      if (!targetAccountId) {
-        this.logger.warn(
-          `Could not determine target account for outbound request ${reqSeqNum}`
-        );
-        continue;
-      }
-
-      const existingConnections = this.stateManager.listConnections();
-      const alreadyConnectedState = existingConnections.some(
-        (conn) =>
-          conn.targetAccountId === targetAccountId &&
-          conn.status === 'established' &&
-          !conn.isPending &&
-          !conn.needsConfirmation
-      );
-      if (alreadyConnectedState) {
-        continue;
-      }
-
-      const profile = connectionMap.profileMap.get(targetAccountId);
-      const profileInfo = profile
-        ? this.mapSDKProfileToInfo(profile)
-        : undefined;
-
-      pending.push({
-        id: reqSeqNum,
-        requestorId: targetAccountId,
-        requestorName: profileInfo?.name || `Agent ${targetAccountId}`,
-        timestamp: new Date(request.created || Date.now()),
-        memo: request.m || '',
-        profile: profileInfo,
-        status: 'pending_outbound',
-      });
-    }
-
-    return pending;
-  }
-
-  /**
-   * Helper to attempt extracting target account ID from outbound request message.
-   */
-  private extractTargetAccountIdFromOutbound(
-    message: HCSMessage
-  ): string | undefined {
-    if (!message.operator_id) {
-      return undefined;
-    }
-    return this.hcsClient.standardClient.extractAccountFromOperatorId(
-      message.operator_id
-    );
-  }
-
-  /**
-   * Maps HCS11Profile to the AgentProfileInfo used in state/display.
-   */
-  private mapSDKProfileToInfo(profile: HCS11Profile): AgentProfileInfo {
-    return {
-      name: profile.display_name || profile.alias,
-      bio: profile.bio,
-      avatar: profile.profileImage,
-      type: profile.type === 1 ? 'AI Agent' : 'Personal',
-    };
-  }
-
-  /**
-   * Extracts the account ID from relevant fields in an HCSMessage.
-   */
-  private extractAccountIdFromMessage(message: HCSMessage): string | undefined {
-    if (message.operator_id) {
-      return this.hcsClient.standardClient.extractAccountFromOperatorId(
-        message.operator_id
-      );
-    }
-    return message.connected_account_id || undefined;
+    return [...pendingRequests, ...connectionsNeedingConfirmation];
   }
 
   /**
    * Formats the list of pending requests for display.
    */
   private formatRequestsList(
-    requests: PendingRequest[],
+    requests: Connection[],
     sortBy: string,
     limit?: number
   ): string {
@@ -249,17 +117,17 @@ export class ListUnapprovedConnectionRequestsTool extends StructuredTool {
         request.status === 'needs_confirmation'
           ? '🟠 Incoming'
           : '⚪️ Outgoing';
-      output += `${index + 1}. ${statusIndicator} - ID: ${request.id}\n`;
+      output += `${index + 1}. ${statusIndicator} - ID: ${request.uniqueRequestKey}\n`;
       output += `   ${
         request.status === 'needs_confirmation' ? 'From:' : 'To:  '
-      } ${request.requestorName} (${request.requestorId})\n`;
-      output += `   Sent/Rcvd: ${request.timestamp.toLocaleString()}\n`;
+      } ${request.targetAgentName} (${request.targetAccountId})\n`;
+      output += `   Sent/Rcvd: ${request.created.toLocaleString()}\n`;
       if (request.memo) {
         output += `   Memo: ${request.memo}\n`;
       }
-      if (request.profile?.bio) {
-        output += `   Bio: ${request.profile.bio.substring(0, 100)}${
-          request.profile.bio.length > 100 ? '...' : ''
+      if (request.profileInfo?.bio) {
+        output += `   Bio: ${request.profileInfo.bio.substring(0, 100)}${
+          request.profileInfo.bio.length > 100 ? '...' : ''
         }\n`;
       }
       output += '\n';
@@ -274,31 +142,31 @@ export class ListUnapprovedConnectionRequestsTool extends StructuredTool {
    * Sorts connection requests based on the specified criteria.
    */
   private sortRequests(
-    requests: PendingRequest[],
+    requests: Connection[],
     sortBy: string
-  ): PendingRequest[] {
+  ): Connection[] {
     const requestsCopy = [...requests];
 
     switch (sortBy) {
       case 'time_asc':
         return requestsCopy.sort(
-          (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+          (a, b) => a.created.getTime() - b.created.getTime()
         );
       case 'time_desc':
         return requestsCopy.sort(
-          (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+          (a, b) => b.created.getTime() - a.created.getTime()
         );
       case 'name_asc':
         return requestsCopy.sort((a, b) =>
-          a.requestorName.localeCompare(b.requestorName)
+          a.targetAgentName?.localeCompare(b?.targetAgentName || '') || 0
         );
       case 'name_desc':
         return requestsCopy.sort((a, b) =>
-          b.requestorName.localeCompare(a.requestorName)
+          b.targetAgentName?.localeCompare(a?.targetAgentName || '') || 0
         );
       default:
         return requestsCopy.sort(
-          (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+          (a, b) => b.created.getTime() - a.created.getTime()
         );
     }
   }

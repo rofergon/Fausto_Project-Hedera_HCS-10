@@ -1,6 +1,6 @@
 import { StructuredTool, ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
-import { HCS10Client } from '../hcs10/HCS10Client';
+import { HCS10Client, HCSMessageWithTimestamp } from '../hcs10/HCS10Client';
 import { IStateManager } from '../state/state-types';
 import { Logger } from '@hashgraphonline/standards-sdk'; // Assuming logger utility
 
@@ -10,17 +10,36 @@ export interface CheckMessagesToolParams extends ToolParams {
 }
 
 /**
- * A tool to check for new messages on an active HCS-10 connection topic.
+ * A tool to check for new messages on an active HCS-10 connection topic,
+ * or optionally fetch the latest messages regardless of timestamp.
  */
 export class CheckMessagesTool extends StructuredTool {
-  name = 'check_new_messages';
-  description =
-    "Checks for and retrieves new messages from an active connection. Identify the target agent using their account ID (e.g., 0.0.12345) or the connection number shown in 'list_connections'.";
+  name = 'check_messages';
+  description = `Checks for and retrieves messages from an active connection. 
+Identify the target agent using their account ID (e.g., 0.0.12345) or the connection number shown in 'list_connections'. 
+By default, it only retrieves messages newer than the last check. 
+Use 'fetchLatest: true' to get the most recent messages regardless of when they arrived. 
+Use 'lastMessagesCount' to specify how many latest messages to retrieve (default 1 when fetchLatest is true).`;
   schema = z.object({
     targetIdentifier: z
       .string()
       .describe(
         "The account ID (e.g., 0.0.12345) of the target agent OR the connection number (e.g., '1', '2') from the 'list_connections' tool to check messages for."
+      ),
+    fetchLatest: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        'Set to true to fetch the latest messages even if they have been seen before, ignoring the last checked timestamp. Defaults to false (fetching only new messages).'
+      ),
+    lastMessagesCount: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'When fetchLatest is true, specifies how many of the most recent messages to retrieve. Defaults to 1.'
       ),
   });
 
@@ -37,6 +56,8 @@ export class CheckMessagesTool extends StructuredTool {
 
   protected async _call({
     targetIdentifier,
+    fetchLatest,
+    lastMessagesCount,
   }: z.infer<this['schema']>): Promise<string> {
     const connection =
       this.stateManager.getConnectionByIdentifier(targetIdentifier);
@@ -51,44 +72,59 @@ export class CheckMessagesTool extends StructuredTool {
       this.stateManager.getLastTimestamp(connectionTopicId);
 
     this.logger.info(
-      `Checking messages for connection with ${targetAgentName} (${connection.targetAccountId}) on topic ${connectionTopicId} since timestamp ${lastProcessedTimestamp}`
+      `Checking messages for connection with ${targetAgentName} (${connection.targetAccountId}) on topic ${connectionTopicId} (fetchLatest: ${fetchLatest}, lastCount: ${lastMessagesCount}, since: ${lastProcessedTimestamp})`
     );
 
     try {
       // 1. Get messages from the topic
-      // Note: hcsClient.getMessages returns timestamp in milliseconds
       const result = await this.hcsClient.getMessages(connectionTopicId);
-      const allMessages = result.messages; // Array<{ timestamp: number; data: string; sequence_number: number }>
+      const allMessages = result.messages;
 
       if (!allMessages || allMessages.length === 0) {
         return `No messages found on connection topic ${connectionTopicId}.`;
       }
 
-      // 2. Filter messages newer than the last processed timestamp
-      // Convert message timestamp (ms) to nanoseconds for comparison
-      const newMessages = allMessages.filter((msg) => {
-        const msgTimestampNanos = msg.timestamp * 1_000_000;
-        return msgTimestampNanos > lastProcessedTimestamp;
-      });
+      let messagesToProcess: HCSMessageWithTimestamp[] = [];
+      let latestTimestampNanos = lastProcessedTimestamp;
+      const isFetchingLatest = fetchLatest === true;
 
-      if (newMessages.length === 0) {
-        return `No new messages found for connection with ${targetAgentName} since last check.`;
+      if (isFetchingLatest) {
+        this.logger.info('Fetching latest messages regardless of timestamp.');
+        const count = lastMessagesCount ?? 1;
+        messagesToProcess = allMessages.slice(-count);
+      } else {
+        this.logger.info(
+          `Filtering for messages newer than ${lastProcessedTimestamp}`
+        );
+        messagesToProcess = allMessages.filter((msg) => {
+          const msgTimestampNanos = msg.timestamp * 1_000_000;
+          return msgTimestampNanos > lastProcessedTimestamp;
+        });
+        
+        if (messagesToProcess.length > 0) {
+          latestTimestampNanos = messagesToProcess.reduce(
+            (maxTs, msg) => Math.max(maxTs, msg.timestamp * 1_000_000),
+             lastProcessedTimestamp
+          );
+        }
       }
 
-      this.logger.info(`Found ${newMessages.length} new message(s).`);
+      if (messagesToProcess.length === 0) {
+        return isFetchingLatest
+          ? `Could not retrieve the latest message(s). No messages found on topic ${connectionTopicId}.`
+          : `No new messages found for connection with ${targetAgentName} since last check.`;
+      }
 
-      // 3. Process new messages (resolve inscriptions, format)
-      let outputString = `New messages from ${targetAgentName}:
+      this.logger.info(`Processing ${messagesToProcess.length} message(s).`);
+
+      // 3. Process messages (resolve inscriptions, format)
+      let outputString = isFetchingLatest
+        ? `Latest message(s) from ${targetAgentName}:
+`
+        : `New messages from ${targetAgentName}:
 `;
-      let latestTimestampNanos = lastProcessedTimestamp;
 
-      for (const msg of newMessages) {
-        const msgTimestampNanos = msg.timestamp * 1_000_000;
-        latestTimestampNanos = Math.max(
-          latestTimestampNanos,
-          msgTimestampNanos
-        );
-
+      for (const msg of messagesToProcess) {
         let content = msg.data;
         try {
           // Check for inscription HRL
@@ -134,8 +170,8 @@ ${displayContent}
         }
       }
 
-      // 4. Update the timestamp in demo state
-      if (latestTimestampNanos > lastProcessedTimestamp) {
+      // 4. Update the timestamp in demo state ONLY if fetching NEW messages
+      if (!isFetchingLatest && latestTimestampNanos > lastProcessedTimestamp) {
         this.logger.debug(
           `Updating timestamp for topic ${connectionTopicId} to ${latestTimestampNanos}`
         );

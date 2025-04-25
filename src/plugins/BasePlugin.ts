@@ -10,9 +10,9 @@ export abstract class BasePlugin implements IPlugin {
   abstract description: string;
   abstract version: string;
   abstract author: string;
-  
+
   protected context!: PluginContext;
-  
+
   /**
    * Initialize the plugin with the provided context
    * @param context The context containing shared resources
@@ -20,13 +20,13 @@ export abstract class BasePlugin implements IPlugin {
   async initialize(context: PluginContext): Promise<void> {
     this.context = context;
   }
-  
+
   /**
    * Get the tools provided by this plugin
    * @returns Array of tools provided by this plugin
    */
   abstract getTools(): StructuredTool[];
-  
+
   /**
    * Clean up resources when the plugin is unloaded
    * Default implementation does nothing

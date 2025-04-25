@@ -2,7 +2,6 @@ import { HCS10Client } from '../hcs10/HCS10Client';
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { Logger } from '@hashgraphonline/standards-sdk';
-import * as crypto from 'crypto';
 
 /**
  * SendMessageTool wraps the sendMessage() function of HCS10Client.
@@ -19,16 +18,10 @@ export class SendMessageTool extends StructuredTool {
   schema = z.object({
     topicId: z.string().describe('The Hedera topic ID to send the message to'),
     message: z.string().describe('The message content to send'),
-    messageType: z
-      .string()
+    disableMonitoring: z
+      .boolean()
       .optional()
-      .describe(
-        "Optional type of message (e.g., 'data_analysis_request', 'detailed_analysis_request')"
-      ),
-    dataset: z
-      .string()
-      .optional()
-      .describe('Optional dataset identifier for analysis requests'),
+      .describe('Whether to disable monitoring for responses'),
   });
 
   /**
@@ -46,30 +39,25 @@ export class SendMessageTool extends StructuredTool {
   async _call(input: {
     topicId: string;
     message: string;
-    messageType?: string;
-    dataset?: string;
+    disableMonitoring: boolean;
   }): Promise<string> {
     try {
-      const messageData = {
-        data: input.message,
-        requestId: `req-${crypto.randomBytes(8).toString('hex')}`,
-        ...(input.messageType && { messageType: input.messageType }),
-        ...(input.dataset && { dataset: input.dataset }),
-      };
-
       const result = await this.client.sendMessage(
         input.topicId,
-        JSON.stringify(messageData)
+        input.message
       );
       if (!result) {
         throw new Error('Failed to send message');
       }
       this.logger.info(`Message sent with sequence number ${result}`);
-      const response = await this.monitorResponses(input.topicId, result);
-
-      return `Successfully sent message to topic ${input.topicId}${
-        response ? `\nResponse: ${response}` : ''
-      }`;
+      if (!input.disableMonitoring) {
+        const response = await this.monitorResponses(input.topicId, result);
+        return `Successfully sent message to topic ${input.topicId}${
+          response ? `\nResponse: ${response}` : ''
+        }`;
+      } else {
+        return `Successfully sent message to topic ${input.topicId}`;
+      }
     } catch (error) {
       throw new Error(
         `Failed to send message: ${
@@ -107,6 +95,10 @@ export class SendMessageTool extends StructuredTool {
               continue;
             }
             if (message.sequence_number > sequenceNumber) {
+              // Unwrap nested data field if present
+              if (parsedContent && typeof parsedContent.data === 'string') {
+                return parsedContent.data;
+              }
               return JSON.stringify(parsedContent);
             }
           }

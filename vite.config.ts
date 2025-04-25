@@ -6,7 +6,6 @@ import path from 'path';
 const externalDependencies = [
   '@hashgraph/proto',
   '@hashgraph/sdk',
-  'fetch-retry',
   'fs',
   'path',
   'url',
@@ -17,34 +16,36 @@ export default defineConfig({
   build: {
     lib: {
       entry: path.resolve(__dirname, 'src/index.ts'),
-      name: 'HashgraphOnlineAgentKit', // Choose a suitable name
+      name: 'HashgraphOnlineAgentKit',
       fileName: (format) => `index.${format}.js`,
-      formats: ['es'], // Build specifically for ES Modules
+      formats: ['es'],
     },
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
       external: externalDependencies,
-      input: {
-        main: path.resolve(__dirname, 'src/index.ts'),
+      output: {
+        preserveModules: false,
+        preserveModulesRoot: 'src'
       },
     },
+    emptyOutDir: false,
   },
   plugins: [
     dts({
       insertTypesEntry: true,
       include: ['src/**/*.ts'],
-      exclude: ['**/*.d.ts'],
+      exclude: ['**/*.test.ts', '**/__tests__/**', '**/node_modules/**'],
       outDir: 'dist',
+      tsconfigPath: './tsconfig.json',
     }),
   ],
   resolve: {
     alias: {
-      // Add aliases if needed, e.g., for src directory
-      // '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, './src'),
     },
   },
-  ssr: {
-    external: externalDependencies,
+  optimizeDeps: {
+    exclude: externalDependencies,
   },
 });

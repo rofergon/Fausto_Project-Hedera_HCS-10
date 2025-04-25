@@ -1,16 +1,12 @@
 import {
   HCS10Client,
   AgentBuilder,
-  InboundTopicType,
   Logger,
-  AIAgentCapability,
   HederaMirrorNode,
 } from '@hashgraphonline/standards-sdk';
 import { TransferTransaction, Hbar } from '@hashgraph/sdk';
 import fs from 'fs';
 import path from 'path';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 export const MIN_REQUIRED_USD = 2.0;
 export const MIN_REQUIRED_HBAR_USD = 10.0;

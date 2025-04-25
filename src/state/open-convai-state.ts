@@ -1,12 +1,19 @@
-import { updateEnvFile } from '../../examples/utils';
+import { updateEnvFile } from '../utils/state-tools';
 import {
   RegisteredAgent,
   ActiveConnection,
-  ConnectionRequestInfo,
   IStateManager,
   AgentPersistenceOptions,
   EnvFilePersistenceOptions,
+  ConnectionStatus,
 } from './state-types';
+import {
+  ConnectionsManager,
+  HCS10BaseClient,
+  Connection,
+  Logger,
+  IConnectionsManager,
+} from '@hashgraphonline/standards-sdk';
 
 /**
  * Implementation of the IStateManager interface for the OpenConvai system.
@@ -15,11 +22,11 @@ import {
  */
 export class OpenConvaiState implements IStateManager {
   private currentAgent: RegisteredAgent | null = null;
-  private activeConnections: ActiveConnection[] = [];
   private connectionMessageTimestamps: Record<string, number> = {};
-  private connectionRequests: Map<number, ConnectionRequestInfo> = new Map();
   private defaultEnvFilePath?: string;
   private defaultPrefix: string;
+  private connectionsManager: IConnectionsManager | null = null;
+  private logger: Logger;
 
   /**
    * Creates a new OpenConvaiState instance
@@ -28,9 +35,43 @@ export class OpenConvaiState implements IStateManager {
   constructor(options?: {
     defaultEnvFilePath?: string;
     defaultPrefix?: string;
+    baseClient?: HCS10BaseClient;
   }) {
     this.defaultEnvFilePath = options?.defaultEnvFilePath;
     this.defaultPrefix = options?.defaultPrefix ?? 'TODD';
+    this.logger = new Logger({ module: 'OpenConvaiState' });
+
+    // Initialize ConnectionsManager immediately if baseClient is provided
+    if (options?.baseClient) {
+      this.initializeConnectionsManager(options.baseClient);
+    }
+  }
+
+  /**
+   * Initializes the ConnectionsManager
+   * @param baseClient - HCS10BaseClient instance to use
+   */
+  initializeConnectionsManager(
+    baseClient: HCS10BaseClient
+  ): IConnectionsManager {
+    if (!this.connectionsManager) {
+      this.logger.debug('Initializing ConnectionsManager');
+      this.connectionsManager = new ConnectionsManager({
+        baseClient,
+        logLevel: 'error',
+      });
+    } else {
+      this.logger.debug('ConnectionsManager already initialized');
+    }
+    return this.connectionsManager;
+  }
+
+  /**
+   * Gets the ConnectionsManager instance
+   * @returns The ConnectionsManager instance, or null if not initialized
+   */
+  getConnectionsManager(): IConnectionsManager | null {
+    return this.connectionsManager;
   }
 
   /**
@@ -39,9 +80,12 @@ export class OpenConvaiState implements IStateManager {
    */
   setCurrentAgent(agent: RegisteredAgent | null): void {
     this.currentAgent = agent;
-    this.activeConnections = [];
     this.connectionMessageTimestamps = {};
-    this.connectionRequests.clear();
+
+    // Clear connections manager when changing agents
+    if (this.connectionsManager) {
+      this.connectionsManager.clearAll();
+    }
   }
 
   /**
@@ -57,12 +101,35 @@ export class OpenConvaiState implements IStateManager {
    * Initializes timestamp tracking for the connection.
    */
   addActiveConnection(connection: ActiveConnection): void {
-    if (this.findConnectionIndex(connection.connectionTopicId) !== -1) {
-      return;
+    if (!this.connectionsManager) {
+      this.logger.error(
+        'ConnectionsManager not initialized. Call initializeConnectionsManager before adding connections.'
+      );
+      throw new Error(
+        'ConnectionsManager not initialized. Call initializeConnectionsManager before adding connections.'
+      );
     }
 
-    this.activeConnections.push({ ...connection });
+    // Convert from ActiveConnection to Connection
+    const sdkConnection: Connection = {
+      connectionTopicId: connection.connectionTopicId,
+      targetAccountId: connection.targetAccountId,
+      targetAgentName: connection.targetAgentName,
+      targetInboundTopicId: connection.targetInboundTopicId,
+      status: this.convertConnectionStatus(connection.status || 'established'),
+      isPending: connection.isPending || false,
+      needsConfirmation: connection.needsConfirmation || false,
+      created: connection.created || new Date(),
+      lastActivity: connection.lastActivity,
+      profileInfo: connection.profileInfo,
+      connectionRequestId: connection.connectionRequestId,
+      processed: true,
+    };
 
+    // Add to ConnectionsManager
+    this.connectionsManager.updateOrAddConnection(sdkConnection);
+
+    // Initialize timestamp tracking
     this.initializeTimestampIfNeeded(connection.connectionTopicId);
   }
 
@@ -71,25 +138,24 @@ export class OpenConvaiState implements IStateManager {
    * Preserves existing properties when updating by merging objects.
    */
   updateOrAddConnection(connection: ActiveConnection): void {
-    const index = this.findConnectionIndex(connection.connectionTopicId);
-
-    if (index !== -1) {
-      this.activeConnections[index] = {
-        ...this.activeConnections[index],
-        ...connection,
-      };
-    } else {
-      this.addActiveConnection(connection);
-    }
-
-    this.initializeTimestampIfNeeded(connection.connectionTopicId);
+    this.addActiveConnection(connection);
   }
 
   /**
    * Returns a copy of all active connections.
    */
   listConnections(): ActiveConnection[] {
-    return [...this.activeConnections];
+    if (!this.connectionsManager) {
+      this.logger.debug(
+        'ConnectionsManager not initialized, returning empty connections list'
+      );
+      return [];
+    }
+
+    // Convert SDK Connections to ActiveConnection
+    return this.connectionsManager
+      .getAllConnections()
+      .map((conn) => this.convertToActiveConnection(conn));
   }
 
   /**
@@ -99,20 +165,37 @@ export class OpenConvaiState implements IStateManager {
    * - A connection topic ID string
    */
   getConnectionByIdentifier(identifier: string): ActiveConnection | undefined {
+    if (!this.connectionsManager) {
+      return undefined;
+    }
+
+    const connections = this.listConnections();
+
+    // Check if it's a 1-based index
     const numericIndex = parseInt(identifier) - 1;
     if (
       !isNaN(numericIndex) &&
       numericIndex >= 0 &&
-      numericIndex < this.activeConnections.length
+      numericIndex < connections.length
     ) {
-      return this.activeConnections[numericIndex];
+      return connections[numericIndex];
     }
 
-    return this.activeConnections.find(
-      (conn) =>
-        conn.targetAccountId === identifier ||
-        conn.connectionTopicId === identifier
-    );
+    // Check if it's a topic ID
+    const byTopicId =
+      this.connectionsManager.getConnectionByTopicId(identifier);
+    if (byTopicId) {
+      return this.convertToActiveConnection(byTopicId);
+    }
+
+    // Check if it's an account ID
+    const byAccountId =
+      this.connectionsManager.getConnectionByAccountId(identifier);
+    if (byAccountId) {
+      return this.convertToActiveConnection(byAccountId);
+    }
+
+    return undefined;
   }
 
   /**
@@ -128,23 +211,18 @@ export class OpenConvaiState implements IStateManager {
    * but only if the new timestamp is more recent than the existing one.
    */
   updateTimestamp(connectionTopicId: string, timestampNanos: number): void {
-    if (connectionTopicId in this.connectionMessageTimestamps) {
-      const currentTimestamp =
-        this.connectionMessageTimestamps[connectionTopicId];
-      if (timestampNanos > currentTimestamp) {
-        this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
-      }
+    // Initialize if this is first update and skip the comparison logic
+    if (!(connectionTopicId in this.connectionMessageTimestamps)) {
+      this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
+      return;
     }
-  }
 
-  /**
-   * Helper method to find a connection's index by its topic ID.
-   * Returns -1 if not found.
-   */
-  private findConnectionIndex(connectionTopicId: string): number {
-    return this.activeConnections.findIndex(
-      (conn) => conn.connectionTopicId === connectionTopicId
-    );
+    // Otherwise, only update if newer
+    const currentTimestamp =
+      this.connectionMessageTimestamps[connectionTopicId];
+    if (timestampNanos > currentTimestamp) {
+      this.connectionMessageTimestamps[connectionTopicId] = timestampNanos;
+    }
   }
 
   /**
@@ -158,26 +236,59 @@ export class OpenConvaiState implements IStateManager {
     }
   }
 
-  addConnectionRequest(request: ConnectionRequestInfo): void {
-    this.connectionRequests.set(request.id, { ...request });
+  /**
+   * Converts ConnectionStatus to SDK status format
+   */
+  private convertConnectionStatus(
+    status: string
+  ): 'pending' | 'established' | 'needs_confirmation' | 'closed' {
+    switch (status) {
+      case 'pending':
+        return 'pending';
+      case 'established':
+        return 'established';
+      case 'needs confirmation':
+        return 'needs_confirmation';
+      default:
+        return 'established';
+    }
   }
 
-  listConnectionRequests(): ConnectionRequestInfo[] {
-    return Array.from(this.connectionRequests.values());
+  /**
+   * Converts SDK Connection to ActiveConnection
+   */
+  private convertToActiveConnection(conn: Connection): ActiveConnection {
+    return {
+      targetAccountId: conn.targetAccountId,
+      targetAgentName: conn.targetAgentName || `Agent ${conn.targetAccountId}`,
+      targetInboundTopicId: conn.targetInboundTopicId || '',
+      connectionTopicId: conn.connectionTopicId,
+      status: this.convertToStateStatus(conn.status),
+      created: conn.created,
+      lastActivity: conn.lastActivity,
+      isPending: conn.isPending,
+      needsConfirmation: conn.needsConfirmation,
+      profileInfo: conn.profileInfo,
+      connectionRequestId: conn.connectionRequestId,
+    };
   }
 
-  getConnectionRequestById(
-    requestId: number
-  ): ConnectionRequestInfo | undefined {
-    return this.connectionRequests.get(requestId);
-  }
-
-  removeConnectionRequest(requestId: number): void {
-    this.connectionRequests.delete(requestId);
-  }
-
-  clearConnectionRequests(): void {
-    this.connectionRequests.clear();
+  /**
+   * Converts SDK status to state status format
+   */
+  private convertToStateStatus(status: string): ConnectionStatus {
+    switch (status) {
+      case 'pending':
+        return 'pending';
+      case 'established':
+        return 'established';
+      case 'needs_confirmation':
+        return 'needs confirmation';
+      case 'closed':
+        return 'established'; // Mapping closed to established for compatibility
+      default:
+        return 'unknown';
+    }
   }
 
   /**
