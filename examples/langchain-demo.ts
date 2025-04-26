@@ -22,6 +22,7 @@ import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
 import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
+import SauceSwapPlugin from './plugins/SauceSwap/index';
 
 // --- LangChain Imports ---
 import { ChatOpenAI } from '@langchain/openai';
@@ -57,6 +58,7 @@ You also have access to a plugin system that provides additional tools for vario
 - Weather tools: Get current weather and weather forecasts for locations
 - DeFi tools: Get token prices, check token balances, and simulate token swaps
 - Hedera tools: Get the current HBAR price
+- SauceSwap tools: Get information about SauceSwap V2 pools and liquidity. The pools are shown 5 at a time using pagination. Use the 'page' parameter to navigate through pages (e.g., page=1 for first 5 pools, page=2 for next 5, etc.)
 
 *** IMPORTANT TOOL SELECTION RULES ***
 - To REGISTER a new agent, use 'register_agent'.
@@ -71,6 +73,12 @@ You also have access to a plugin system that provides additional tools for vario
 - For WEATHER information, use the appropriate weather plugin tools.
 - For DeFi operations, use the appropriate DeFi plugin tools.
 - For the CURRENT HBAR PRICE, use the 'getHbarPrice' tool.
+- For SauceSwap information:
+  * Use 'get_sauceswap_pools' to get information about available pools
+  * Shows 5 pools per page
+  * Use the 'page' parameter to navigate (e.g., page=1, page=2, etc.)
+  * If no page is specified, defaults to page 1
+  * The tool will tell you how many pages are available
 - Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
@@ -340,10 +348,12 @@ async function initialize() {
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
       const hbarPricePlugin = new HbarPricePlugin();
+      const sauceSwapPlugin = new SauceSwapPlugin();
 
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
       await pluginRegistry.registerPlugin(hbarPricePlugin);
+      await pluginRegistry.registerPlugin(sauceSwapPlugin);
 
       console.log('Plugin system initialized successfully.');
 
@@ -366,8 +376,8 @@ async function initialize() {
     // --- Initialize LangChain Components ---
     const llm = new ChatOpenAI({
       apiKey: openaiApiKey,
-      modelName: 'gpt-4o',
-      temperature: 0,
+      modelName: 'o4-mini',
+      temperature: 1,
     });
 
     memory = new ConversationTokenBufferMemory({
