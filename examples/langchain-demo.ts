@@ -75,10 +75,16 @@ You also have access to a plugin system that provides additional tools for vario
 - For the CURRENT HBAR PRICE, use the 'getHbarPrice' tool.
 - For SauceSwap information:
   * Use 'get_sauceswap_pools' to get information about available pools
-  * Shows 5 pools per page
-  * Use the 'page' parameter to navigate (e.g., page=1, page=2, etc.)
-  * If no page is specified, defaults to page 1
-  * The tool will tell you how many pages are available
+    - Shows 5 pools per page
+    - Use the 'page' parameter to navigate (e.g., page=1, page=2, etc.)
+    - If no page is specified, defaults to page 1
+    - The tool will tell you how many pages are available
+  * Use 'get_sauceswap_pool_details' to get detailed information about a specific pool
+    - Requires a pool ID (number)
+    - Returns detailed information about the pool including:
+      - LP token details (name, symbol, decimals, price, total reserve)
+      - Token A and B details (name, symbol, decimals, price, reserve, website, description)
+    - Works on both mainnet and testnet (defaults to mainnet)
 - Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
