@@ -1,35 +1,81 @@
 # Creating Custom Tools for Standards Agent Kit
 
-This guide explains how to create custom tools and plugins for the Standards Agent Kit. We'll use the SauceSwap plugin as an example to demonstrate the process.
+This guide explains how to create custom tools and plugins for the Standards Agent Kit, using SauceSwap as our example.
 
 ## Table of Contents
 - [Plugin Structure](#plugin-structure)
-- [Creating a New Tool](#creating-a-new-tool)
-- [Creating a Plugin](#creating-a-plugin)
+- [Step-by-Step Guide](#step-by-step-guide)
 - [Testing Your Plugin](#testing-your-plugin)
 - [Integration with LangChain Demo](#integration-with-langchain-demo)
+- [Best Practices](#best-practices)
 
 ## Plugin Structure
 
-A typical plugin structure looks like this:
+Plugins can be organized in two ways depending on complexity:
 
+### Simple Plugin Structure
 ```
 examples/plugins/YourPlugin/
 ├── __tests__/              # Test files
 │   └── index.test.ts       # Unit tests for your plugin
-├── index.ts                # Main plugin file
-└── README.md              # Plugin documentation
+├── index.ts                # Main plugin file with tool implementation
+└── README.md               # Plugin documentation
 ```
 
-## Creating a New Tool
+### Complex Plugin Structure (Multiple Tools)
+```
+examples/plugins/YourPlugin/
+├── index.ts                # Main plugin file that exports all tools
+├── tool1_name/             # Directory for first tool
+│   ├── __tests__/          # Tests for first tool
+│   │   └── index.test.ts
+│   └── index.ts            # Implementation of first tool
+├── tool2_name/             # Directory for second tool
+│   ├── __tests__/          # Tests for second tool
+│   │   └── index.test.ts
+│   └── index.ts            # Implementation of second tool
+└── README.md               # Plugin documentation
+```
 
-1. First, create a new tool class that extends `StructuredTool` from LangChain:
+## Step-by-Step Guide
+
+### 1. Plan Your Tool
+
+First, define what your tool will do:
+- **Purpose**: What problem does your tool solve?
+- **Parameters**: What inputs will it accept?
+- **API Integration**: Will it communicate with external APIs?
+- **Return Format**: What data will it return to the agent?
+
+Example (SauceSwap Pool Details Tool):
+- **Purpose**: Get detailed information about a specific SauceSwap pool by ID
+- **API Endpoint**: `/pools/{poolId}`
+- **Parameters**: 
+  - `poolId` (required): ID of the pool to retrieve
+  - `network` (optional): 'mainnet' or 'testnet'
+- **Response Format**: Formatted pool information including tokens, reserves, etc.
+
+### 2. Create the Directory Structure
+
+For a new tool in an existing plugin:
+```bash
+mkdir -p examples/plugins/YourPlugin/your_tool_name/__tests__
+```
+
+For a completely new plugin:
+```bash
+mkdir -p examples/plugins/YourPlugin/__tests__
+```
+
+### 3. Implement the Tool
+
+Create a tool class extending `StructuredTool`:
 
 ```typescript
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-class YourCustomTool extends StructuredTool {
+export class YourCustomTool extends StructuredTool {
   name = 'your_tool_name';
   description = 'Description of what your tool does';
   
@@ -52,12 +98,43 @@ class YourCustomTool extends StructuredTool {
 }
 ```
 
-## Creating a Plugin
+### 4. Write Tests
 
-1. Create a plugin class that extends `BasePlugin`:
+Create comprehensive tests in the `__tests__` directory:
+
+```typescript
+import { YourCustomTool } from '../index';
+
+describe('YourCustomTool', () => {
+  let tool: YourCustomTool;
+
+  beforeEach(() => {
+    tool = new YourCustomTool();
+  });
+
+  it('should have correct name and description', () => {
+    expect(tool.name).toBe('your_tool_name');
+    expect(tool.description).toContain('Description');
+  });
+
+  it('should handle successful execution', async () => {
+    // Test happy path
+  });
+
+  it('should handle error cases', async () => {
+    // Test error scenarios
+  });
+});
+```
+
+### 5. Create or Update the Plugin Class
+
+For a new plugin, create a class extending `BasePlugin`:
 
 ```typescript
 import { BasePlugin, PluginContext } from '../../../src/plugins';
+import { StructuredTool } from '@langchain/core/tools';
+import { YourCustomTool } from './your_tool_name';
 
 export default class YourPlugin extends BasePlugin {
   id = 'your-plugin-id';
@@ -79,138 +156,158 @@ export default class YourPlugin extends BasePlugin {
 }
 ```
 
-## Example: SauceSwap Plugin
-
-Here's a real example using the SauceSwap plugin:
+For adding a tool to an existing plugin, update its `getTools` method:
 
 ```typescript
-// Tool definition
-class GetSauceSwapPoolsTool extends StructuredTool {
-  name = 'get_sauceswap_pools';
-  description = 'Get information about SauceSwap V2 pools';
-  
-  private readonly POOLS_PER_PAGE = 5;
-  
-  schema = z.object({
-    network: z.enum(['mainnet', 'testnet'])
-      .default('mainnet')
-      .describe('The network to query'),
-    page: z.number().min(1)
-      .optional()
-      .describe('Page number (5 pools per page)')
-  });
-  
-  async _call(input: z.infer<typeof this.schema>): Promise<string> {
-    try {
-      // API call and data processing
-      const response = await axios.get<PoolInfo[]>(`${apiUrl}/v2/pools`);
-      // Format and return results
-      return formattedResult;
-    } catch (error) {
-      return `Error: ${error.message}`;
-    }
-  }
+getTools(): StructuredTool[] {
+  return [
+    new ExistingTool(),
+    new YourCustomTool() // Add your new tool here
+  ];
 }
+```
 
-// Plugin definition
-export default class SauceSwapPlugin extends BasePlugin {
-  id = 'sauceswap';
-  name = 'SauceSwap Plugin';
-  description = 'Provides tools to interact with SauceSwap DEX';
-  
-  getTools(): StructuredTool[] {
-    return [new GetSauceSwapPoolsTool()];
-  }
-}
+### 6. Update the Agent's Knowledge
+
+Update the agent's personality in `examples/langchain-demo.ts`:
+
+```typescript
+const AGENT_PERSONALITY = `
+...
+- For YourPlugin information:
+  * Use 'your_tool_name' to do something specific
+    - Requires parameter1 (description)
+    - Optional parameter2 (description)
+    - Returns useful information about X
+...
+`;
+```
+
+### 7. Run Tests and Build
+
+Test your implementation:
+```bash
+npm test examples/plugins/YourPlugin/__tests__/index.test.ts
+```
+
+Build the project:
+```bash
+npm run build
 ```
 
 ## Testing Your Plugin
 
-1. Create test files in the `__tests__` directory:
+1. Unit Tests: Test each tool's logic in isolation
+2. Integration Tests: Test how your plugin works with the agent
+3. Error Handling: Test various error scenarios
 
-```typescript
-import { YourCustomTool } from '../index';
-
-describe('YourCustomTool', () => {
-  let tool: YourCustomTool;
-
-  beforeEach(() => {
-    tool = new YourCustomTool();
-  });
-
-  it('should have correct name and description', () => {
-    expect(tool.name).toBe('your_tool_name');
-    expect(tool.description).toContain('Description');
-  });
-
-  // Add more test cases for your tool's functionality
-});
-```
-
-2. Run tests using:
+Run tests:
 ```bash
 npm test examples/plugins/YourPlugin/__tests__/index.test.ts
 ```
 
 ## Integration with LangChain Demo
 
-1. Import your plugin in `examples/langchain-demo.ts`:
+1. Import your plugin:
 ```typescript
 import YourPlugin from './plugins/YourPlugin';
 ```
 
-2. Register your plugin in the initialization section:
+2. Register your plugin:
 ```typescript
 const yourPlugin = new YourPlugin();
 await pluginRegistry.registerPlugin(yourPlugin);
 ```
 
-3. Update the `AGENT_PERSONALITY` to include information about your tool:
-```typescript
-const AGENT_PERSONALITY = `
-...
-You also have access to:
-- Your Plugin tools: Description of what your tools do and how to use them
-...
-`;
-```
+3. Update the agent's personality with tool information.
 
 ## Best Practices
 
 1. **Error Handling**:
-   - Always wrap API calls in try-catch blocks
+   - Wrap API calls in try-catch blocks
    - Provide meaningful error messages
-   - Log errors for debugging
+   - Log errors with descriptive context
 
 2. **Documentation**:
-   - Provide clear descriptions for your tools
-   - Document all parameters
-   - Include examples in your plugin's README
+   - Use clear tool names and descriptions
+   - Document all parameters thoroughly
+   - Include examples in your README
 
 3. **Testing**:
-   - Write comprehensive unit tests
-   - Test error cases
+   - Write unit tests for all functionality
+   - Test error cases and edge cases
    - Mock external dependencies
 
 4. **Code Organization**:
-   - Keep tools focused and single-purpose
-   - Use TypeScript interfaces for data structures
-   - Follow the existing plugin structure
+   - Keep tools focused on a single responsibility
+   - Use TypeScript interfaces for better type safety
+   - Follow existing patterns in the codebase
 
-## Example Usage
+## Real-World Example: SauceSwap Pool Details Tool
 
-Once your plugin is integrated, it can be used in the LangChain demo like this:
+Here's a complete implementation of the `get_sauceswap_pool_details` tool:
 
+```typescript
+// Tool implementation
+export class GetSauceSwapPoolDetailsTool extends StructuredTool {
+  name = 'get_sauceswap_pool_details';
+  description = 'Get detailed information about a specific SauceSwap V2 pool by its ID';
+
+  schema = z.object({
+    network: z.enum(['mainnet', 'testnet'])
+      .default('mainnet')
+      .describe('The network to query (mainnet or testnet)'),
+    poolId: z.number()
+      .min(1)
+      .describe('The ID of the pool to get details for')
+  });
+
+  async _call(input: z.infer<typeof this.schema>): Promise<string> {
+    try {
+      const baseUrl = input.network === 'mainnet' 
+        ? 'https://api.saucerswap.finance'
+        : 'https://testnet-api.saucerswap.finance';
+
+      const response = await axios.get<PoolDetails>(`${baseUrl}/pools/${input.poolId}`);
+      const pool = response.data;
+
+      // Format and return result
+      return JSON.stringify({
+        poolId: pool.id,
+        contractId: pool.contractId,
+        lpToken: { /* formatted LP token data */ },
+        tokenA: { /* formatted token A data */ },
+        tokenB: { /* formatted token B data */ }
+      }, null, 2);
+    } catch (error) {
+      // Error handling logic
+      return `Error message`;
+    }
+  }
+}
+
+// Plugin update
+export default class SauceSwapPlugin extends BasePlugin {
+  // Plugin metadata...
+  
+  getTools(): StructuredTool[] {
+    return [
+      new GetSauceSwapPoolsTool(),
+      new GetSauceSwapPoolDetailsTool() // Our new tool
+    ];
+  }
+}
+
+// Agent personality update
+const AGENT_PERSONALITY = `
+...
+- For SauceSwap information:
+  * Use 'get_sauceswap_pools' to get information about available pools
+  * Use 'get_sauceswap_pool_details' to get detailed information about a specific pool
+    - Requires a pool ID (number)
+    - Returns detailed information about the pool
+...
+`;
 ```
-You: Use your_tool_name with param1="example"
-Agent: Let me fetch that information for you...
-[Tool uses your custom implementation]
-Here are the results: [formatted output]
-```
 
-Remember to rebuild the project after making changes:
-```bash
-npm run build
-```
-
-For more examples, check out the existing plugins in the `examples/plugins` directory. 
+For a complete implementation, check out the SauceSwap plugin in the `examples/plugins/SauceSwap` directory. 
