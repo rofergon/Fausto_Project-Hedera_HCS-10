@@ -44,8 +44,8 @@ program
   .action(async (options) => {
     try {
       const requiredEnvVars = [
-        'HEDERA_ACCOUNT_ID',
-        'HEDERA_PRIVATE_KEY',
+        'HEDERA_OPERATOR_ID',
+        'HEDERA_OPERATOR_KEY',
         'AGENT_ACCOUNT_ID',
         'AGENT_PRIVATE_KEY',
         'AGENT_INBOUND_TOPIC_ID',
@@ -176,8 +176,8 @@ program
 
       if (!fs.existsSync(envPath)) {
         const envTemplate = `# Hedera Account Information
-HEDERA_ACCOUNT_ID=
-HEDERA_PRIVATE_KEY=
+HEDERA_OPERATOR_ID=
+HEDERA_OPERATOR_KEY=
 
 # Agent HCS Topics
 AGENT_ACCOUNT_ID=
@@ -371,7 +371,7 @@ program
   )
   .action(async (options) => {
     try {
-      const requiredEnvVars = ['HEDERA_ACCOUNT_ID', 'HEDERA_PRIVATE_KEY'];
+      const requiredEnvVars = ['HEDERA_OPERATOR_ID', 'HEDERA_OPERATOR_KEY'];
 
       const missingEnvVars = requiredEnvVars.filter(
         (envVar) => !process.env[envVar]
@@ -390,8 +390,8 @@ program
 
       stateManager.setCurrentAgent({
         name: options.name,
-        accountId: process.env.HEDERA_ACCOUNT_ID!,
-        privateKey: process.env.HEDERA_PRIVATE_KEY!,
+        accountId: process.env.HEDERA_OPERATOR_ID!,
+        privateKey: process.env.HEDERA_OPERATOR_KEY!,
         inboundTopicId: '',
         outboundTopicId: '',
         profileTopicId: '',
@@ -399,8 +399,8 @@ program
 
       const { tools } = initializeHCS10Client({
         clientConfig: {
-          operatorId: process.env.HEDERA_ACCOUNT_ID!,
-          operatorKey: process.env.HEDERA_PRIVATE_KEY!,
+          operatorId: process.env.HEDERA_OPERATOR_ID!,
+          operatorKey: process.env.HEDERA_OPERATOR_KEY!,
           network: options.network,
         },
         createAllTools: true,
