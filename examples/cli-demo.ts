@@ -21,6 +21,7 @@ import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
 import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
+import SauceSwapPlugin from './plugins/SauceSwap';
 import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
@@ -1000,6 +1001,9 @@ async function showMenu() {
   console.log('Plugin System:');
   console.log('  13. Use Plugin Tool');
   console.log('  14. Send Weather Report via Message');
+  console.log('  15. Get SauceSwap Pools');
+  console.log('  16. Get SauceSwap Pool Details');
+  console.log('  17. Get SauceSwap Token Details');
   console.log('-----------------------------------------');
   console.log('  0. Exit');
   console.log('=========================================');
@@ -1048,6 +1052,15 @@ async function showMenu() {
       break;
     case '14':
       await sendWeatherReportViaMessage();
+      break;
+    case '15':
+      await getSauceSwapPools();
+      break;
+    case '16':
+      await getSauceSwapPoolDetails();
+      break;
+    case '17':
+      await getSauceSwapTokenDetails();
       break;
     case '0':
       console.log('Exiting demo...');
@@ -1425,11 +1438,7 @@ async function main() {
           stateManager: stateManager,
         });
 
-        connectionMonitorTool = new ConnectionMonitorTool({
-          hcsClient: hcsClient,
-          stateManager: stateManager,
-        });
-
+        connectionMonitorTool.updateClient(hcsClient);
         console.log('Client and tools reconfigured for the selected agent.');
       } else {
         console.log(
@@ -1451,7 +1460,7 @@ async function main() {
       pluginContext = {
         client: hcsClient,
         logger: new Logger({
-          module: 'WeatherPlugin',
+          module: 'PluginSystem',
         }),
         config: {
           weatherApiKey: weatherApiKey,
@@ -1465,13 +1474,15 @@ async function main() {
       const weatherPlugin = new WeatherPlugin();
       const defiPlugin = new DeFiPlugin();
       const hbarPricePlugin = new HbarPricePlugin();
+      const sauceSwapPlugin = new SauceSwapPlugin();
 
       await pluginRegistry.registerPlugin(weatherPlugin);
       await pluginRegistry.registerPlugin(defiPlugin);
       await pluginRegistry.registerPlugin(hbarPricePlugin);
+      await pluginRegistry.registerPlugin(sauceSwapPlugin);
 
       console.log('Plugin system initialized successfully!');
-      console.log('Weather, DeFi, and HBAR Price plugins loaded automatically.');
+      console.log('Weather, DeFi, HBAR Price, and SauceSwap plugins loaded automatically.');
 
       if (!weatherApiKey) {
         console.log(
@@ -2076,6 +2087,98 @@ async function registerNewAgent() {
   } catch (error) {
     // Catch unexpected errors during tool instantiation or invocation
     console.error('\nError during agent registration process:', error);
+  }
+}
+
+// Add new functions for SauceSwap tools
+async function getSauceSwapPools() {
+  displayHeader('Get SauceSwap Pools');
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized.');
+    return;
+  }
+
+  const tools = pluginRegistry.getAllTools();
+  const poolsTool = tools.find(tool => tool.name === 'get_sauceswap_pools');
+
+  if (!poolsTool) {
+    console.log('SauceSwap pools tool not found.');
+    return;
+  }
+
+  const page = await question('Enter page number (default is 1): ');
+  try {
+    const result = await poolsTool.invoke({
+      page: page ? parseInt(page) : 1
+    });
+    console.log('\nSauceSwap Pools:');
+    console.log(result);
+  } catch (error) {
+    console.error('Error getting SauceSwap pools:', error);
+  }
+}
+
+async function getSauceSwapPoolDetails() {
+  displayHeader('Get SauceSwap Pool Details');
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized.');
+    return;
+  }
+
+  const tools = pluginRegistry.getAllTools();
+  const poolDetailsTool = tools.find(tool => tool.name === 'get_sauceswap_pool_details');
+
+  if (!poolDetailsTool) {
+    console.log('SauceSwap pool details tool not found.');
+    return;
+  }
+
+  const poolId = await question('Enter pool ID: ');
+  if (!poolId || isNaN(parseInt(poolId))) {
+    console.log('Invalid pool ID.');
+    return;
+  }
+
+  try {
+    const result = await poolDetailsTool.invoke({
+      poolId: parseInt(poolId)
+    });
+    console.log('\nPool Details:');
+    console.log(result);
+  } catch (error) {
+    console.error('Error getting pool details:', error);
+  }
+}
+
+async function getSauceSwapTokenDetails() {
+  displayHeader('Get SauceSwap Token Details');
+  if (!pluginRegistry) {
+    console.log('Plugin system not initialized.');
+    return;
+  }
+
+  const tools = pluginRegistry.getAllTools();
+  const tokenDetailsTool = tools.find(tool => tool.name === 'get_sauceswap_token_details');
+
+  if (!tokenDetailsTool) {
+    console.log('SauceSwap token details tool not found.');
+    return;
+  }
+
+  const tokenId = await question('Enter token ID (e.g., 0.0.731861): ');
+  if (!tokenId || !/^\d+\.\d+\.\d+$/.test(tokenId)) {
+    console.log('Invalid token ID format. Should be like 0.0.731861');
+    return;
+  }
+
+  try {
+    const result = await tokenDetailsTool.invoke({
+      tokenId: tokenId
+    });
+    console.log('\nToken Details:');
+    console.log(result);
+  } catch (error) {
+    console.error('Error getting token details:', error);
   }
 }
 
