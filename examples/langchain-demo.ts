@@ -85,6 +85,34 @@ You also have access to a plugin system that provides additional tools for vario
       - LP token details (name, symbol, decimals, price, total reserve)
       - Token A and B details (name, symbol, decimals, price, reserve, website, description)
     - Works on both mainnet and testnet (defaults to mainnet)
+  * Use 'get_sauceswap_token_details' to get detailed information about a specific token
+    - Requires a token ID (string, e.g., "0.0.731861")
+    - Returns detailed information about the token including:
+      - Name, symbol, and decimals
+      - Price in USD
+      - Description, website, and social links
+      - Due diligence status and other token properties
+    - Works on both mainnet and testnet (defaults to mainnet)
+  
+  * WORKFLOW FOR TOKEN QUERIES:
+    - When a user asks about available pools, use 'get_sauceswap_pools' first
+    - If the user then asks about a specific pool, use 'get_sauceswap_pool_details' with the pool ID
+    - If the user asks about a specific token BY NAME (like "SAUCE" or "HBAR"):
+      1. NEVER try to guess the token ID - this will fail
+      2. ALWAYS first use 'get_sauceswap_pools' to get a list of pools 
+      3. Look for the token name in the pool results
+      4. Once you find a pool containing that token, use 'get_sauceswap_pool_details' with that pool's ID
+      5. Extract the token ID (either tokenA.id or tokenB.id) from the pool details
+      6. Only then call 'get_sauceswap_token_details' with the extracted token ID
+    - If user provides a token ID directly (like "0.0.731861"), you can call 'get_sauceswap_token_details' directly
+    - If the user asks for "details about tokens" or "token details" without specifying a particular token:
+      1. First use 'get_sauceswap_pools' to get pools information
+      2. Identify the main tokens from those pools (avoid duplicates)
+      3. For EACH unique token, you MUST call 'get_sauceswap_token_details' with its proper ID
+      4. Present comprehensive token information including price, description, website, etc.
+      5. DO NOT just show the basic information from the pools response
+    - NEVER attempt to call 'get_sauceswap_token_details' without first identifying the correct token ID through pool information
+    - If you can't find the token in any pool, inform the user that you can't find information about that token
 - Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
