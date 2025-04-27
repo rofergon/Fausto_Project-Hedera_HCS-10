@@ -1,4 +1,4 @@
-import { HCS10Client, PluginRegistry, PluginContext, Logger } from '../src';
+import { HCS10Client, PluginRegistry, PluginContext, Logger, StandardNetworkType } from '../src';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
 
@@ -9,14 +9,11 @@ async function pluginSystemExample(): Promise<void> {
   console.log('Starting plugin system example...');
 
   try {
-    // Initialize HCS10Client with environment variables
-    // IMPORTANT: Set these environment variables before running this example
-    // or create a .env file with these values
-    const client = new HCS10Client({
-      operatorId: process.env.HEDERA_ACCOUNT_ID,
-      operatorKey: process.env.HEDERA_PRIVATE_KEY,
-      network: 'testnet'
-    });
+    const client = new HCS10Client(
+      process.env.HEDERA_OPERATOR_ID!,
+      process.env.HEDERA_OPERATOR_KEY!,
+      process.env.HEDERA_NETWORK! as StandardNetworkType
+    );
 
     // Create logger
     const logger = Logger.getInstance({
