@@ -2,6 +2,7 @@ import { BasePlugin, PluginContext } from '../../../src/plugins';
 import { StructuredTool } from '@langchain/core/tools';
 import { GetSauceSwapPoolsTool } from './get_sauceswap_pools';
 import { GetSauceSwapPoolDetailsTool } from './get_sauceswap_pool_details';
+import { GetSauceSwapTokenDetailsTool } from './get_sauceswap_token_details';
 
 /**
  * SauceSwap Plugin for the Standards Agent Kit
@@ -22,7 +23,8 @@ export default class SauceSwapPlugin extends BasePlugin {
   getTools(): StructuredTool[] {
     return [
       new GetSauceSwapPoolsTool(),
-      new GetSauceSwapPoolDetailsTool()
+      new GetSauceSwapPoolDetailsTool(),
+      new GetSauceSwapTokenDetailsTool()
     ];
   }
 } 
