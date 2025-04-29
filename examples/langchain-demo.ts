@@ -47,6 +47,17 @@ interface AgentIdentity {
   profileTopicId?: string;
 }
 
+export interface HCSMessage {
+  op?: string;
+  sequence_number?: number;
+  created?: Date;
+  data?: string;
+  operator_id?: string;
+  connection_topic_id?: string;
+  connection_request_id?: number;
+  uniqueRequestKey?: string;
+}
+
 // --- Configuration ---
 const AGENT_PERSONALITY = `You are a helpful assistant managing Hedera HCS-10 connections and messages.
 You have access to tools for registering agents, finding registered agents, initiating connections, listing active connections, sending messages over connections, and checking for new messages.
@@ -120,7 +131,7 @@ Remember the connection numbers when listing connections, as users might refer t
 // --- Global Variables ---
 let hcsClient: HCS10Client;
 let stateManager: IStateManager;
-let agentExecutor: AgentExecutor;
+let agentExecutor: AgentExecutor | null = null;
 let memory: ConversationTokenBufferMemory;
 let connectionMonitor: ConnectionTool | null = null;
 let connectionMonitorTool: ConnectionMonitorTool | null = null;
@@ -129,6 +140,11 @@ let tools: StructuredToolInterface[] = [];
 // Plugin system state
 let pluginRegistry: PluginRegistry | null = null;
 let pluginContext: PluginContext | null = null;
+
+// Message tracking state
+const processedMessages: Map<string, Set<number>> = new Map();
+const messagesInProcess: Map<string, Set<number>> = new Map();
+const lastProcessedTimestamps: Map<string, number> = new Map();
 
 /**
  * Loads agent details from environment variables using a specified prefix
@@ -201,6 +217,210 @@ async function promptUserToSelectAgent(
   }
 
   return agents[index];
+}
+
+/**
+ * Initializes message tracking for all established connections
+ */
+async function initializeMessageTracking() {
+  console.log('Initializing message tracking system...');
+  
+  const connections = stateManager
+    .listConnections()
+    .filter((conn) => conn.status === 'established');
+
+  for (const conn of connections) {
+    const topicId = conn.connectionTopicId;
+    if (!topicId.match(/^[0-9]+\.[0-9]+\.[0-9]+$/)) {
+      console.warn(`Skipping invalid topic ID format: ${topicId}`);
+      continue;
+    }
+
+    processedMessages.set(topicId, new Set<number>());
+    messagesInProcess.set(topicId, new Set<number>());
+    lastProcessedTimestamps.set(topicId, Date.now() - 24 * 60 * 60 * 1000);
+
+    console.log(`Initialized message tracking for topic ${topicId}`);
+  }
+}
+
+/**
+ * Handles processing and responding to incoming messages
+ */
+async function handleIncomingMessage(message: HCSMessage, topicId: string) {
+  // Initialize sequence number with default value
+  const sequenceNumber = message.sequence_number || -1;
+
+  try {
+    if (!message.data || message.sequence_number === undefined) {
+      return;
+    }
+
+    // Skip messages from self
+    if (message.operator_id && message.operator_id.includes(hcsClient.getOperatorId())) {
+      console.log(`Skipping own message #${sequenceNumber}`);
+      return;
+    }
+
+    // Get or initialize the processed messages set for this topic
+    let processedSet = processedMessages.get(topicId);
+    if (!processedSet) {
+      processedSet = new Set<number>();
+      processedMessages.set(topicId, processedSet);
+    }
+
+    // Get or initialize the in-process messages set for this topic
+    let inProcessSet = messagesInProcess.get(topicId);
+    if (!inProcessSet) {
+      inProcessSet = new Set<number>();
+      messagesInProcess.set(topicId, inProcessSet);
+    }
+
+    // Check if message was already processed or is being processed
+    if (processedSet.has(sequenceNumber)) {
+      console.log(`Skipping already processed message #${sequenceNumber}`);
+      return;
+    }
+
+    if (inProcessSet.has(sequenceNumber)) {
+      console.log(`Message #${sequenceNumber} is already being processed`);
+      return;
+    }
+
+    // Mark message as in process
+    inProcessSet.add(sequenceNumber);
+
+    console.log(`Processing message #${sequenceNumber}: ${message.data.substring(0, 100)}${message.data.length > 100 ? '...' : ''}`);
+
+    let messageText = message.data;
+    try {
+      // Try to parse JSON if the message is JSON
+      if (messageText.startsWith('{') || messageText.startsWith('[')) {
+        const jsonData = JSON.parse(messageText);
+        if (typeof jsonData === 'object') {
+          messageText = JSON.stringify(jsonData, null, 2);
+        }
+      }
+    } catch (error) {
+      // If not valid JSON, use raw text
+      console.debug('Message is not JSON, using raw text');
+    }
+
+    // Check if agentExecutor is initialized
+    if (!agentExecutor) {
+      console.error('Agent executor not initialized');
+      return;
+    }
+
+    // Process message
+    const response = await agentExecutor.invoke({
+      input: messageText,
+      chat_history: [] // Initialize empty chat history for each new message
+    });
+
+    // Extract just the output string from the response
+    const outputText = typeof response.output === 'string' 
+      ? response.output 
+      : response.output?.output || response.output?.text || JSON.stringify(response.output);
+
+    // Send response using SendMessageTool
+    const sendMessageTool = tools.find(t => t instanceof SendMessageTool) as SendMessageTool;
+    if (sendMessageTool) {
+      const responseMessage = `[Reply to #${sequenceNumber}] ${outputText}`;
+      
+      await sendMessageTool.invoke({
+        topicId: topicId,
+        message: responseMessage,
+        memo: `Reply to message #${sequenceNumber}`,
+        disableMonitoring: true,
+      });
+
+      console.log(`Sent response to message #${sequenceNumber}`);
+    }
+
+    // Mark message as processed AFTER successful processing
+    if (processedSet) {
+      processedSet.add(sequenceNumber);
+    }
+    
+    if (message.created) {
+      lastProcessedTimestamps.set(topicId, message.created.getTime());
+    }
+
+  } catch (error) {
+    console.error(`Error processing message #${sequenceNumber}:`, error);
+    
+    // Try to send error message
+    try {
+      const sendMessageTool = tools.find(t => t instanceof SendMessageTool) as SendMessageTool;
+      if (sendMessageTool) {
+        await sendMessageTool.invoke({
+          topicId: topicId,
+          message: `[Error Reply to #${sequenceNumber}] Sorry, I encountered an error while processing your message. Please try again.`,
+          memo: `Error response to message #${sequenceNumber}`,
+          disableMonitoring: true,
+        });
+      }
+    } catch (sendError) {
+      console.error('Failed to send error message:', sendError);
+    }
+
+    // Mark message as processed even if it failed
+    let errorProcessedSet = processedMessages.get(topicId);
+    if (!errorProcessedSet) {
+      errorProcessedSet = new Set<number>();
+      processedMessages.set(topicId, errorProcessedSet);
+    }
+    errorProcessedSet.add(sequenceNumber);
+  } finally {
+    // Always remove from in-process set
+    let inProcessSet = messagesInProcess.get(topicId);
+    if (inProcessSet) {
+      inProcessSet.delete(sequenceNumber);
+    }
+  }
+}
+
+/**
+ * Checks for and processes new messages from all established connections
+ */
+async function checkForNewMessages() {
+  const connections = stateManager
+    .listConnections()
+    .filter((conn) => conn.status === 'established');
+
+  for (const conn of connections) {
+    const topicId = conn.connectionTopicId;
+    if (!topicId.match(/^[0-9]+\.[0-9]+\.[0-9]+$/)) {
+      console.warn(`Skipping invalid topic ID format: ${topicId}`);
+      continue;
+    }
+
+    try {
+      // Get the last processed timestamp for this topic
+      const lastTimestamp = lastProcessedTimestamps.get(topicId) || 0;
+
+      // Get messages from the topic
+      const messages = await hcsClient.getMessageStream(topicId);
+      
+      for (const message of messages.messages) {
+        if (
+          message.sequence_number && 
+          message.op === 'message' &&
+          message.created &&
+          message.created.getTime() > lastTimestamp &&
+          message.operator_id &&
+          !message.operator_id.includes(hcsClient.getOperatorId()) &&
+          !processedMessages.get(topicId)?.has(message.sequence_number) &&
+          !messagesInProcess.get(topicId)?.has(message.sequence_number)
+        ) {
+          await handleIncomingMessage(message, topicId);
+        }
+      }
+    } catch (error) {
+      console.error(`Error checking messages for topic ${topicId}:`, error);
+    }
+  }
 }
 
 // --- Initialization ---
@@ -402,235 +622,158 @@ async function initialize() {
         console.log('Weather plugin tools will not function correctly without an API key.');
         console.log('Set WEATHER_API_KEY in your .env file to use the Weather plugin.');
       }
+
     } catch (error) {
       console.error('Error initializing plugin system:', error);
-      console.log('Continuing without plugin functionality.');
     }
 
-    // --- Initialize LangChain Components ---
+    // Initialize LangChain components
     const llm = new ChatOpenAI({
-      apiKey: openaiApiKey,
-      modelName: 'o4-mini',
-      temperature: 1,
+      openAIApiKey: openaiApiKey,
+      modelName: 'gpt-4-turbo-preview',
+      temperature: 0
     });
 
     memory = new ConversationTokenBufferMemory({
-      llm: llm,
+      llm,
       memoryKey: 'chat_history',
       returnMessages: true,
-      outputKey: 'output',
-      maxTokenLimit: 1000,
+      maxTokenLimit: 4000,
+      inputKey: 'input',
+      outputKey: 'output'  // Specify the output key explicitly
     });
 
     const prompt = ChatPromptTemplate.fromMessages([
       ['system', AGENT_PERSONALITY],
       new MessagesPlaceholder('chat_history'),
       ['human', '{input}'],
-      new MessagesPlaceholder('agent_scratchpad'),
+      new MessagesPlaceholder('agent_scratchpad')
     ]);
 
     const agent = await createOpenAIToolsAgent({
       llm,
       tools,
-      prompt,
+      prompt
     });
+    console.log('LangChain agent created successfully');
 
     agentExecutor = new AgentExecutor({
       agent,
       tools,
       memory,
-      verbose: false,
+      maxIterations: 3,
+      verbose: true
     });
+    console.log('Agent executor initialized');
 
-    runMonitoring();
-
-    console.log('LangChain agent initialized.');
   } catch (error) {
-    console.error('Initialization failed:', error);
-    process.exit(1);
+    console.error('Error initializing HCS-10 LangChain Agent:', error);
+    throw error;  // Re-throw to handle in the calling function
   }
 }
 
-/**
- * Initializes monitoring for connections with proper Promise handling
- */
-async function runMonitoring(): Promise<void> {
-  console.log('[DEBUG] Entering runMonitoring function...');
+async function startConsoleMode() {
+  console.log('\nStarting console mode...');
+  console.log('Type your messages and press Enter to send. Type "exit" to quit.\n');
 
-  // Restore promise array logic for background initiation
-  const monitoringPromises: Promise<unknown>[] = [];
-
-  if (connectionMonitor) {
-    console.log('Attempting to start background connection monitoring...');
-    try {
-      // Invoke and push promise without awaiting
-      const monitorPromise = connectionMonitor.invoke({});
-      monitoringPromises.push(monitorPromise);
-
-      monitorPromise
-        .then(() => {
-          console.log('Background connection monitor initiated.');
-        })
-        .catch((err) => {
-          console.error(
-            'Could not get inbound topic ID to start monitor:',
-            err
-          );
-          console.warn('Connection monitoring (ConnectionTool) could not be started.');
-        });
-    } catch (err) {
-       // Catch potential synchronous errors during invoke setup
-       console.error('Error setting up ConnectionTool monitoring:', err);
-    }
-  }
-
-  if (connectionMonitorTool) {
-    console.log(
-      'Attempting to start ConnectionMonitorTool...'
-    );
-    try {
-      // Invoke and push promise without awaiting
-      const toolMonitorPromise = connectionMonitorTool.invoke({
-        monitorDurationSeconds: 300,
-        acceptAll: false,
-      });
-      monitoringPromises.push(toolMonitorPromise);
-
-      toolMonitorPromise
-        .then(() => {
-          console.log(
-            'ConnectionMonitorTool started to watch for connection requests.'
-          );
-        })
-        .catch((err) => {
-           console.error('Could not start ConnectionMonitorTool:', err);
-        });
-    } catch (err) {
-       // Catch potential synchronous errors during invoke setup
-       console.error('Error setting up ConnectionMonitorTool monitoring:', err);
-    }
-  }
-
-  // Restore Promise.allSettled to wait for initiation, not completion
-  await Promise.allSettled(monitoringPromises);
-
-  // Keep delay for log separation
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  console.log('\n----------------------------------------');
-}
-
-/**
- * Creates the LangChain agent with tools and memory
- */
-async function setupAgent() {
-  console.log('[DEBUG] Entering setupAgent function...'); // Add debug log
-  const llm = new ChatOpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-    modelName: 'gpt-4o',
-    temperature: 0,
-  });
-
-  memory = new ConversationTokenBufferMemory({
-    llm: llm,
-    memoryKey: 'chat_history',
-    returnMessages: true,
-    outputKey: 'output',
-    maxTokenLimit: 1000,
-  });
-
-  const prompt = ChatPromptTemplate.fromMessages([
-    ['system', AGENT_PERSONALITY],
-    new MessagesPlaceholder('chat_history'),
-    ['human', '{input}'],
-    new MessagesPlaceholder('agent_scratchpad'),
-  ]);
-
-  const agent = await createOpenAIToolsAgent({
-    llm,
-    tools,
-    prompt,
-  });
-
-  agentExecutor = new AgentExecutor({
-    agent,
-    tools,
-    memory,
-    verbose: false,
-  });
-
-  console.log('LangChain agent initialized.');
-}
-
-/**
- * Handles the main chat interaction loop
- */
-async function chatLoop() {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: process.stdout
   });
 
-  console.log("\nAgent ready. Type your message or 'exit' to quit.");
-
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const userInput = await new Promise<string>((resolve) => {
-      rl.question('You: ', resolve);
-    });
-
-    if (userInput.toLowerCase() === 'exit') {
-      console.log('Exiting chat...');
+  const processUserInput = async (input: string) => {
+    if (input.toLowerCase() === 'exit') {
+      console.log('Exiting console mode...');
       rl.close();
-      if (
-        connectionMonitor &&
-        typeof connectionMonitor.stopMonitoring === 'function'
-      ) {
-        console.log('Stopping connection monitor...');
-        connectionMonitor.stopMonitoring();
-      }
-      break;
+      process.exit(0);
     }
 
     try {
-      console.log('Agent thinking...');
-      const result = await agentExecutor.invoke({ input: userInput });
-      console.log(`Agent: ${result.output}`);
-    } catch (error) {
-      console.error('Error during agent execution:', error);
-      // Log the full error object for more details
-      if (error instanceof Error) {
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+      if (!agentExecutor) {
+        console.error('Agent executor not initialized');
+        return;
       }
-      console.log('Agent: Sorry, I encountered an error processing your request. Please try again.');
+
+      const response = await agentExecutor.invoke({
+        input: input
+      });
+
+      console.log('\nAgent response:', response.output);
+      console.log('\nEnter your next message (or type "exit" to quit):');
+    } catch (error) {
+      console.error('Error processing input:', error);
     }
-  }
+  };
+
+  rl.on('line', (input) => {
+    processUserInput(input);
+  });
 }
 
-/**
- * Main program execution with clean sequential flow
- */
+async function startAutomatedMode() {
+  console.log('\nStarting automated HCS-10 monitoring mode...');
+  
+  // Initialize message tracking
+  await initializeMessageTracking();
+  
+  // Start monitoring for new messages and connections
+  setInterval(async () => {
+    try {
+      if (connectionMonitorTool) {
+        await connectionMonitorTool.invoke({
+          acceptAll: true,
+          monitorDurationSeconds: 5,
+        });
+      }
+      await checkForNewMessages();
+    } catch (error) {
+      console.error('Error in monitoring loop:', error);
+    }
+  }, 10000);
+  
+  console.log('Automated monitoring active. Press Ctrl+C to exit.');
+}
+
+async function promptForMode(): Promise<'console' | 'automated'> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    console.log('\nPlease select operation mode:');
+    console.log('1. Console mode (interactive chat)');
+    console.log('2. Automated HCS-10 monitoring mode');
+    
+    rl.question('Enter your choice (1 or 2): ', (answer) => {
+      rl.close();
+      if (answer === '1') {
+        resolve('console');
+      } else if (answer === '2') {
+        resolve('automated');
+      } else {
+        console.log('Invalid choice. Defaulting to automated mode.');
+        resolve('automated');
+      }
+    });
+  });
+}
+
+// --- Main Execution ---
 async function main() {
-  try {
-    // Step 1: Initialize client, state, and load agent identities
-    await initialize();
+  console.log('Starting initialization...');
+  await initialize();
+  console.log('Initialization complete');
 
-    // Step 2: Set up LangChain agent with tools
-    await setupAgent();
-
-    // Step 3: Start monitoring and wait for it to complete initialization
-    await runMonitoring();
-
-    // Step 4: Only start chat loop after everything is fully ready
-    await chatLoop();
-  } catch (err) {
-    console.error('Unhandled error in main execution flow:', err);
-    process.exit(1);
+  const mode = await promptForMode();
+  
+  if (mode === 'console') {
+    await startConsoleMode();
+  } else {
+    await startAutomatedMode();
   }
 }
 
-main().catch((err) => {
-  console.error('Unhandled error in main loop:', err);
-  process.exit(1);
+main().catch((error) => {
+  console.error('Error in main execution:', error);
 });
