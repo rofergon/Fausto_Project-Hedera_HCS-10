@@ -104,29 +104,62 @@ You also have access to a plugin system that provides additional tools for vario
       - Description, website, and social links
       - Due diligence status and other token properties
     - Works on both mainnet and testnet (defaults to mainnet)
+  * Use 'get_sauceswap_associated_pools' to find all pools that contain a specific token
+    - Requires a token ID (string, e.g., "0.0.731861")
+    - Returns a list of all pools where the token is either tokenA or tokenB
+    - For each pool, returns:
+      - Pool ID and contract ID
+      - LP token information (name, symbol, price, total reserve)
+      - Both tokens in the pool with their details (name, symbol, price, reserves)
+    - Works on both mainnet and testnet (defaults to mainnet)
+    - Useful for finding all trading pairs for a specific token
   
   * WORKFLOW FOR TOKEN QUERIES:
     - When a user asks about available pools, use 'get_sauceswap_pools' first
-    - If the user then asks about a specific pool, use 'get_sauceswap_pool_details' with the pool ID
     - If the user asks about a specific token BY NAME (like "SAUCE" or "HBAR"):
       1. NEVER try to guess the token ID - this will fail
       2. ALWAYS first use 'get_sauceswap_pools' to get a list of pools 
       3. Look for the token name in the pool results
-      4. Once you find a pool containing that token, use 'get_sauceswap_pool_details' with that pool's ID
-      5. Extract the token ID (either tokenA.id or tokenB.id) from the pool details
-      6. Only then call 'get_sauceswap_token_details' with the extracted token ID
-    - If user provides a token ID directly (like "0.0.731861"), you can call 'get_sauceswap_token_details' directly
+      4. Once you find a pool containing that token, you can either:
+         a) Use 'get_sauceswap_pool_details' with that pool's ID for detailed pool information
+         b) Use 'get_sauceswap_associated_pools' with the token's ID to find ALL pools containing that token
+         c) Use 'get_sauceswap_token_details' with the token's ID for token-specific information
+    - If user provides a token ID directly (like "0.0.731861"), you can use any of these tools directly:
+      * 'get_sauceswap_token_details' for token information
+      * 'get_sauceswap_associated_pools' to find all pools containing that token
+    - If the user asks about "trading pairs" or "liquidity pools" for a specific token:
+      1. If you have the token ID, use 'get_sauceswap_associated_pools' directly
+      2. If you only have the token name, follow the token name workflow above
     - If the user asks for "details about tokens" or "token details" without specifying a particular token:
       1. First use 'get_sauceswap_pools' to get pools information
       2. Identify the main tokens from those pools (avoid duplicates)
-      3. For EACH unique token, you MUST call 'get_sauceswap_token_details' with its proper ID
-      4. Present comprehensive token information including price, description, website, etc.
-      5. DO NOT just show the basic information from the pools response
-    - NEVER attempt to call 'get_sauceswap_token_details' without first identifying the correct token ID through pool information
+      3. For EACH unique token, you can use both:
+         - 'get_sauceswap_token_details' for token information
+         - 'get_sauceswap_associated_pools' to show where the token is being traded
+    - NEVER attempt to call any tool without first identifying the correct token ID through pool information
     - If you can't find the token in any pool, inform the user that you can't find information about that token
-- Do NOT confuse these tools.
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
+
+const WELCOME_MESSAGE = `Hello! I'm your SauceSwap assistant. I can help you with:
+
+🔍 Exploring SauceSwap Pools:
+- View list of available pools (5 pools per page)
+- Get specific details of any pool
+- Navigate between pool pages
+
+📊 Token Information:
+- Get complete token details
+- View current prices
+- Check liquidity information
+- Access reserve data
+
+To get started, you can ask me about:
+- "Show me the available pools"
+- "Give me details of pool #[number]"
+- "What information do you have about token [token ID]?"
+
+I'm here to help! 🚀`;
 
 // --- Global Variables ---
 let hcsClient: HCS10Client;
@@ -423,6 +456,26 @@ async function checkForNewMessages() {
   }
 }
 
+/**
+ * Sends a welcome message to a newly established connection
+ */
+async function sendWelcomeMessage(topicId: string) {
+  try {
+    const sendMessageTool = tools.find(t => t instanceof SendMessageTool) as SendMessageTool;
+    if (sendMessageTool) {
+      await sendMessageTool.invoke({
+        topicId: topicId,
+        message: WELCOME_MESSAGE,
+        memo: 'Welcome message',
+        disableMonitoring: true,
+      });
+      console.log(`Sent welcome message to topic ${topicId}`);
+    }
+  } catch (error) {
+    console.error(`Error sending welcome message to topic ${topicId}:`, error);
+  }
+}
+
 // --- Initialization ---
 async function initialize() {
   console.log('Initializing HCS-10 LangChain Agent...');
@@ -716,14 +769,30 @@ async function startAutomatedMode() {
   // Initialize message tracking
   await initializeMessageTracking();
   
+  // Track established connections to avoid sending welcome message multiple times
+  const welcomedConnections = new Set<string>();
+  
   // Start monitoring for new messages and connections
   setInterval(async () => {
     try {
       if (connectionMonitorTool) {
-        await connectionMonitorTool.invoke({
+        const monitorResult = await connectionMonitorTool.invoke({
           acceptAll: true,
           monitorDurationSeconds: 5,
         });
+
+        // Check for newly established connections
+        const connections = stateManager
+          .listConnections()
+          .filter((conn) => conn.status === 'established');
+
+        for (const conn of connections) {
+          const topicId = conn.connectionTopicId;
+          if (!welcomedConnections.has(topicId)) {
+            await sendWelcomeMessage(topicId);
+            welcomedConnections.add(topicId);
+          }
+        }
       }
       await checkForNewMessages();
     } catch (error) {
