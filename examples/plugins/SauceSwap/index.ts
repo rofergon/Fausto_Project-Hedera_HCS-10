@@ -4,6 +4,7 @@ import { GetSauceSwapPoolsTool } from './get_sauceswap_pools';
 import { GetSauceSwapPoolDetailsTool } from './get_sauceswap_pool_details';
 import { GetSauceSwapTokenDetailsTool } from './get_sauceswap_token_details';
 import { GetSauceSwapAssociatedPoolsTool } from './get_sauceswap_associated_pools';
+import { GetSauceSwapCandlestickTool } from './get_sauceswap_candlestick';
 
 /**
  * SauceSwap Plugin for the Standards Agent Kit
@@ -26,7 +27,8 @@ export default class SauceSwapPlugin extends BasePlugin {
       new GetSauceSwapPoolsTool(),
       new GetSauceSwapPoolDetailsTool(),
       new GetSauceSwapTokenDetailsTool(),
-      new GetSauceSwapAssociatedPoolsTool()
+      new GetSauceSwapAssociatedPoolsTool(),
+      new GetSauceSwapCandlestickTool()
     ];
   }
 } 

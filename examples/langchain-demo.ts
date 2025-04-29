@@ -96,6 +96,27 @@ You also have access to a plugin system that provides additional tools for vario
       - LP token details (name, symbol, decimals, price, total reserve)
       - Token A and B details (name, symbol, decimals, price, reserve, website, description)
     - Works on both mainnet and testnet (defaults to mainnet)
+  * Use 'get_sauceswap_candlestick' to get price chart data for a specific pool
+    - Requires a pool ID (number)
+    - Optional parameters:
+      - interval: Time interval for the candlestick data
+        - 'FIVE': 5-minute intervals
+        - 'MIN': 1-minute intervals
+        - 'HOUR': 1-hour intervals (default)
+        - 'DAY': Daily intervals
+        - 'WEEK': Weekly intervals
+      - inverted: Set to true to invert the price calculation (default: false)
+      - network: 'mainnet' or 'testnet' (default: mainnet)
+    - Returns detailed candlestick data including:
+      - Open, high, low, and close prices
+      - Average price
+      - Volume and liquidity information
+      - Timestamps in both Unix and human-readable format
+    - Examples:
+      - "Get hourly candlestick data for pool 1"
+      - "Show me the daily price chart for pool 2"
+      - "What's the weekly price data for pool 3"
+      - "Get 5-minute candlestick data for pool 4"
   * Use 'get_sauceswap_token_details' to get detailed information about a specific token
     - Requires a token ID (string, e.g., "0.0.731861")
     - Returns detailed information about the token including:
@@ -114,8 +135,14 @@ You also have access to a plugin system that provides additional tools for vario
     - Works on both mainnet and testnet (defaults to mainnet)
     - Useful for finding all trading pairs for a specific token
   
-  * WORKFLOW FOR TOKEN QUERIES:
+  * WORKFLOW FOR TOKEN AND PRICE QUERIES:
     - When a user asks about available pools, use 'get_sauceswap_pools' first
+    - If the user asks about price history or charts:
+      1. First identify the pool ID (if not provided)
+      2. Use 'get_sauceswap_candlestick' with appropriate interval:
+         - For recent price movements: use 'FIVE' or 'MIN' intervals
+         - For daily trading patterns: use 'HOUR' interval
+         - For longer-term trends: use 'DAY' or 'WEEK' intervals
     - If the user asks about a specific token BY NAME (like "SAUCE" or "HBAR"):
       1. NEVER try to guess the token ID - this will fail
       2. ALWAYS first use 'get_sauceswap_pools' to get a list of pools 
@@ -124,6 +151,7 @@ You also have access to a plugin system that provides additional tools for vario
          a) Use 'get_sauceswap_pool_details' with that pool's ID for detailed pool information
          b) Use 'get_sauceswap_associated_pools' with the token's ID to find ALL pools containing that token
          c) Use 'get_sauceswap_token_details' with the token's ID for token-specific information
+         d) Use 'get_sauceswap_candlestick' to get price history for any pool
     - If user provides a token ID directly (like "0.0.731861"), you can use any of these tools directly:
       * 'get_sauceswap_token_details' for token information
       * 'get_sauceswap_associated_pools' to find all pools containing that token
@@ -136,6 +164,7 @@ You also have access to a plugin system that provides additional tools for vario
       3. For EACH unique token, you can use both:
          - 'get_sauceswap_token_details' for token information
          - 'get_sauceswap_associated_pools' to show where the token is being traded
+         - 'get_sauceswap_candlestick' to show recent price history
     - NEVER attempt to call any tool without first identifying the correct token ID through pool information
     - If you can't find the token in any pool, inform the user that you can't find information about that token
 
@@ -154,9 +183,19 @@ const WELCOME_MESSAGE = `Hello! I'm your SauceSwap assistant. I can help you wit
 - Check liquidity information
 - Access reserve data
 
+📈 Price History & Charts:
+- Get candlestick data for any pool
+- View price history at different intervals:
+  • 5-minute data for recent movements
+  • Hourly data for intraday analysis
+  • Daily and weekly data for trends
+- Track volume and liquidity changes
+
 To get started, you can ask me about:
 - "Show me the available pools"
 - "Give me details of pool #[number]"
+- "What's the price history for pool #[number]"
+- "Show me the hourly chart for pool #[number]"
 - "What information do you have about token [token ID]?"
 
 I'm here to help! 🚀`;
