@@ -99,6 +99,8 @@ You also have access to a plugin system that provides additional tools for vario
   * Use 'get_sauceswap_candlestick' to get price chart data for a specific pool
     - Requires a pool ID (number)
     - Optional parameters:
+      - from: Start time in Unix seconds (defaults to 24 hours ago)
+      - to: End time in Unix seconds (defaults to current time)
       - interval: Time interval for the candlestick data
         - 'FIVE': 5-minute intervals
         - 'MIN': 1-minute intervals
@@ -112,11 +114,17 @@ You also have access to a plugin system that provides additional tools for vario
       - Average price
       - Volume and liquidity information
       - Timestamps in both Unix and human-readable format
-    - Examples:
+    - Common use cases:
+      - For recent price movements: Use 'FIVE' or 'MIN' intervals
+      - For intraday trading patterns: Use 'HOUR' interval
+      - For longer-term trends: Use 'DAY' or 'WEEK' intervals
+    - Example queries:
       - "Get hourly candlestick data for pool 1"
       - "Show me the daily price chart for pool 2"
       - "What's the weekly price data for pool 3"
       - "Get 5-minute candlestick data for pool 4"
+      - "Show me the price history for pool 1 from yesterday"
+      - "Get inverted price data for pool 2"
   * Use 'get_sauceswap_token_details' to get detailed information about a specific token
     - Requires a token ID (string, e.g., "0.0.731861")
     - Returns detailed information about the token including:
@@ -143,6 +151,7 @@ You also have access to a plugin system that provides additional tools for vario
          - For recent price movements: use 'FIVE' or 'MIN' intervals
          - For daily trading patterns: use 'HOUR' interval
          - For longer-term trends: use 'DAY' or 'WEEK' intervals
+         - For custom time ranges: use the 'from' and 'to' parameters
     - If the user asks about a specific token BY NAME (like "SAUCE" or "HBAR"):
       1. NEVER try to guess the token ID - this will fail
       2. ALWAYS first use 'get_sauceswap_pools' to get a list of pools 
@@ -184,18 +193,22 @@ const WELCOME_MESSAGE = `Hello! I'm your SauceSwap assistant. I can help you wit
 - Access reserve data
 
 📈 Price History & Charts:
-- Get candlestick data for any pool
-- View price history at different intervals:
+- Get candlestick data for any pool with flexible intervals:
   • 5-minute data for recent movements
-  • Hourly data for intraday analysis
+  • 1-minute data for real-time analysis
+  • Hourly data for intraday patterns
   • Daily and weekly data for trends
+- Customize time ranges for historical data
 - Track volume and liquidity changes
+- View regular or inverted price calculations
 
 To get started, you can ask me about:
 - "Show me the available pools"
 - "Give me details of pool #[number]"
 - "What's the price history for pool #[number]"
 - "Show me the hourly chart for pool #[number]"
+- "Get 5-minute candlestick data for pool #[number]"
+- "Show me the daily price chart for pool #[number] from yesterday"
 - "What information do you have about token [token ID]?"
 
 I'm here to help! 🚀`;
@@ -722,8 +735,8 @@ async function initialize() {
     // Initialize LangChain components
     const llm = new ChatOpenAI({
       openAIApiKey: openaiApiKey,
-      modelName: 'gpt-4-turbo-preview',
-      temperature: 0
+      modelName: 'o4-mini',
+      temperature: 1
     });
 
     memory = new ConversationTokenBufferMemory({
