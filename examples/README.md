@@ -1,132 +1,151 @@
-# Hedera Standards Agent Kit: Examples
+# FaustoAgent: Hedera Consensus Service Agent Framework
 
-This directory contains example applications demonstrating how to use the `@hashgraphonline/standards-agent-kit` library to build agents interacting with the Hedera Consensus Service (HCS) according to the HCS-10 (Agent Communication) standard.
+FaustoAgent is an advanced implementation of the Hedera Standards Agent Kit that provides conversational AI capabilities over the Hedera Consensus Service (HCS). This document details how FaustoAgent.ts works and how to use it effectively.
 
-## Prerequisites
+## Overview
 
-Before running the examples, ensure you have the following:
+FaustoAgent is a conversational AI agent that:
+- Implements the HCS-10 (Agent Communication) standard
+- Uses LangChain and OpenAI for natural language understanding
+- Manages connections to other agents on the Hedera network
+- Processes and responds to messages using AI
+- Includes a plugin system for extended functionality
+- Generates and shares visual data like price charts
 
-1.  **Node.js:** Version 18 or higher is recommended.
-2.  **NPM:** Comes bundled with Node.js.
-3.  **Hedera Account:** A funded account on the Hedera network you intend to use (`mainnet` or `testnet`). This account will act as the operator for deploying and interacting with agents.
-4.  **(LangChain Demo Only)** **OpenAI API Key:** Required for the LangChain example to interact with the language model.
-5.  **Git:** For cloning the repository if you haven't already.
+## Architecture
 
-## Setup
+The agent consists of several interconnected components:
 
-1.  **Clone the Repository:**
+### Core Components
+- **HCS10Client**: Core interface to the Hedera Consensus Service
+- **StateManager**: Maintains agent identity and connection state
+- **AgentExecutor**: Processes messages with LangChain and OpenAI
+- **Tools**: Collection of functionalities for operations like registration, connections, and messaging
+- **PluginRegistry**: Manages and provides access to various plugins
 
-    ```bash
-    git clone https://github.com/hashgraph/hedera-standards.git # Or your fork
-    cd hedera-standards/standards-agent-kit
-    ```
+### Plugins
+FaustoAgent comes with several built-in plugins:
+- **SauceSwapPlugin**: Interfaces with SauceSwap DEX for pool and token information
+- **CandlestickChartPlugin**: Generates price history charts for tokens
+- **DeFiPlugin**: Handles token pricing and DeFi operations
+- **HbarPricePlugin**: Fetches current HBAR cryptocurrency prices
 
-2.  **Install Dependencies:**
-    Navigate to the `standards-agent-kit` directory and install the necessary packages:
 
-    ```bash
-    npm install
-    ```
+## Operation Modes
 
-3.  **Configure Environment Variables:**
-    Copy the example environment file and populate it with your credentials and settings.
+FaustoAgent supports two primary operation modes:
 
-    ```bash
-    cp .env.example .env
-    ```
+### 1. Console Mode
+An interactive chat interface where users can directly communicate with the agent via terminal. Commands entered are processed by the AI system which uses the appropriate tools to respond.
 
-    Edit the `.env` file and set the following variables:
+### 2. Automated Monitoring Mode
+In this mode, the agent:
+- Continuously monitors for incoming connection requests
+- Automatically accepts new connections
+- Sends welcome messages to newly connected agents
+- Listens for messages on all established connections
+- Processes incoming messages with AI and sends responses
+- Implements rate limiting to prevent API overloads
 
-    - `HEDERA_OPERATOR_ID`: Your primary Hedera account ID (e.g., `0.0.12345`).
-    - `HEDERA_PRIVATE_KEY`: The **private key** associated with your `HEDERA_OPERATOR_ID`. _Keep this secure!_
-    - `HEDERA_NETWORK`: The Hedera network to use (`mainnet` or `testnet`). Defaults to `testnet`.
-    - `OPENAI_API_KEY`: (Required for `langchain-demo`) Your API key from OpenAI.
-    - `REGISTRY_URL`: (Optional) URL of the HCS-11 registry service. Defaults to `https://moonscape.tech`.
+## Message Processing Flow
 
-    _Note on Agent Persistence:_ When you register a new agent (e.g., "Todd") using either demo, its details (`TODD_ACCOUNT_ID`, `TODD_PRIVATE_KEY`, etc.) will be automatically added to your `.env` file. On subsequent runs, the demos will detect these variables and can automatically load and use the registered agent.
+1. **Message Deduplication**: Tracks processed messages to prevent duplicates
+2. **JSON Parsing**: Formats JSON messages for better readability
+3. **AI Processing**: Passes messages to the LangChain agent for understanding
+4. **Tool Selection**: Agent selects appropriate tools based on message content
+5. **Response Generation**: Creates responses using the selected tools
+6. **Special Content Handling**: Provides custom handling for images and charts
+7. **Delivery**: Sends responses back to the connection topic
 
-## Available Examples
+## Key Features
 
-### 1. LangChain Agent Demo (`langchain-demo.ts`)
+### Agent Registration and Management
+- Creates new agent identities on the Hedera network
+- Manages multiple agent identities through environment variables
+- Allows switching between different registered agents
 
-This example showcases an interactive AI agent powered by LangChain and OpenAI. You can interact with it using natural language commands to manage HCS-10 agents and communication.
+### Connection Management
+- Initiates connections to other agents using their account IDs
+- Monitors for and accepts incoming connection requests
+- Tracks connection status and history
+- Automatically sends welcome messages to new connections
 
-**How to Run:**
+### Message Handling
+- Processes incoming messages with AI understanding
+- Generates contextually relevant responses
+- Implements batch processing to prevent overloads
+- Includes timeout protection for long-running operations
 
-```bash
-npm run langchain-demo
-```
+### Visualization Capabilities
+- Generates candlestick charts for token price history
+- Uploads images to Hedera for permanent storage
+- Supports HRL (Hedera Resource Location) links for images
+- Optimizes image quality and compression
 
-**Key Features:**
+## Plugin System
 
-- **Natural Language Interface:** Control agent actions via chat commands.
-- **Agent Registration:** Register new HCS-10 agents on Hedera.
-- **Connection Management:** Initiate connections to other agents, list active connections.
-- **Messaging:** Send messages to connected agents and receive replies.
-- **Background Monitoring:** Automatically listens for and accepts incoming connection requests.
+The plugin architecture allows extending functionality without modifying core code:
 
-**Example Usage:**
+1. **Plugin Registration**: Plugins register with the PluginRegistry
+2. **Tool Exposure**: Plugins provide tools that become available to the agent
+3. **Context Sharing**: Plugins receive shared context including the HCS client
+4. **Integration**: Plugin tools are seamlessly integrated with core tools
 
-```
-You: Register me as an agent named 'MyDemoAgent'
-Agent: [Registers agent and confirms]
-You: Connect to agent 0.0.98765
-Agent: [Attempts connection and confirms]
-You: List my connections
-Agent: [Lists active connections, e.g., 1. To: Agent 0.0.98765 (...)]
-You: Send 'Hello there!' to connection 1
-Agent: [Sends message and might show a reply if received quickly]
-You: check new messages for connection 1
-Agent: [Checks for and displays new messages]
-```
+## Configuration and Environment
 
-**How It Works:**
+FaustoAgent uses environment variables for configuration:
+- **HEDERA_OPERATOR_ID**: Primary Hedera account ID
+- **HEDERA_PRIVATE_KEY**: Private key for the operator account
+- **HEDERA_NETWORK**: Target network (mainnet or testnet)
+- **OPENAI_API_KEY**: API key for OpenAI services
+- **REGISTRY_URL**: URL for the HCS-11 registry service
+- **WEATHER_API_KEY**: API key for weather service (optional)
 
-- Uses `langchain` and `@langchain/openai` to create an agent executor.
-- Employs an `OpenAIToolsAgent` which uses the LLM to select the appropriate custom tool based on user input.
-- Leverages custom `StructuredTool` implementations (e.g., `RegisterAgentTool`, `InitiateConnectionTool`, `SendMessageToConnectionTool`, `ConnectionTool`) that wrap `HCS10Client` functionalities.
-- Uses `OpenConvaiState` to manage the active agent's identity and connection details across tool calls.
-- The `ConnectionTool` runs in the background to monitor and handle incoming connection requests.
+Agent identities are stored with prefixed environment variables (e.g., TODD_ACCOUNT_ID, TODD_PRIVATE_KEY).
 
-### 2. Command-Line Interface (CLI) Demo (`cli-demo.ts`)
 
-This example provides a direct, menu-driven interface to interact with HCS-10 functionalities without involving an LLM. It's useful for testing core SDK features and agent interactions directly.
 
-**How to Run:**
+ **Select operation mode**:
+   Choose between console mode or automated monitoring.
 
-```bash
-npm run cli-demo
-```
+ **For automated mode**:
+   - The agent will monitor connections automatically
+   - Messages will be processed and responded to without user intervention
+   - Console will display activity logs
 
-**Key Features:**
+## Error Handling and Recovery
 
-- **Menu-Driven:** Interact via numbered menu options.
-- **Agent Management:** Register new agents, list agents created in the session, select the active agent to operate as.
-- **Connection Management:** Start/stop monitoring for incoming connections, initiate connections, list active connections.
-- **Messaging:** Send messages over active connections, view incoming messages for a selected connection.
+FaustoAgent implements robust error handling:
+- Timeout protection for AI processing
+- Graceful recovery from processing errors
+- Rate limiting to prevent API overloads
+- Message retry logic for failed deliveries
+- Fallback mechanisms for special content handling
 
-**How It Works:**
+## Extending FaustoAgent
 
-- Provides a simple `readline` interface.
-- Directly calls methods on the `HCS10Client` and the `ConnectionTool`.
-- Manages agent and connection state locally within the script.
+To extend FaustoAgent with new capabilities:
+1. Create a new plugin following the plugin interface pattern
+2. Register the plugin with the PluginRegistry
+3. Implement tools that provide the desired functionality
+4. Update the agent personality to include instructions for the new tools
 
-## Key Concepts Demonstrated
+## Performance Considerations
 
-- **`HCS10Client`:** The core class from the agent kit used to interact with the HCS-10 standard (wraps the `@hashgraphonline/standards-sdk`).
-- **Tools (`src/tools/`)**: Reusable LangChain tools encapsulating specific HCS-10 actions (Registering, Connecting, Sending, Monitoring).
-- **State Management (`src/state/open-convai-state.ts`):** (Used in LangChain demo) A simple class to maintain the identity of the currently active agent and its established connections across different agent steps/tool calls.
-- **Agent Registration:** Creating a new Hedera account, associated keys, HCS topics (inbound, outbound, profile), and registering them according to HCS-11 via HCS-10 procedures.
-- **Connection Lifecycle:** Initiating a connection request (`connection_request`), waiting for confirmation (`connection_created`), establishing a shared connection topic, and sending messages (`message`) or closing (`close_connection`).
+- Message processing is batched to prevent overloading
+- Monitoring intervals are throttled to limit API calls
+- Message deduplication reduces redundant processing
+- Welcome messages are only sent once per connection
+- Chart generation is optimized for quality and size
 
-## Troubleshooting
+## Security Features
 
-- **`.env` Errors:** Ensure all required variables are set correctly in your `.env` file, especially `HEDERA_OPERATOR_ID`, `HEDERA_PRIVATE_KEY`, and `OPENAI_API_KEY` (for LangChain).
-- **Insufficient Funds:** Agent registration creates accounts and topics, which costs HBAR. Ensure your `HEDERA_OPERATOR_ID` account has sufficient funds on the target network. The demos attempt to auto-fund newly created agents from the operator, but this might fail.
-- **API Key Issues:** Verify your `OPENAI_API_KEY` is valid and has quota. For LangSmith errors (403 Forbidden), check `LANGCHAIN_API_KEY` and related environment variables or disable tracing by unsetting `LANGCHAIN_TRACING_V2`.
-- **Network Mismatch:** Ensure the `HEDERA_NETWORK` in your `.env` matches the network you intend to use and where your target agents reside.
-- **Tool Errors:** Check the console output for specific error messages from the tools or the underlying SDK.
+- Environment variable-based credential management
+- Topic ID validation before message processing
+- Rate limiting to prevent abuse
+- Timeout protection for long-running operations
+- Message source verification
 
 ---
 
-Explore these examples to understand how the `standards-agent-kit` facilitates building HCS-10 compliant agents on Hedera.
+FaustoAgent demonstrates the powerful capabilities of the Hedera Standards Agent Kit for building conversational AI systems on the Hedera network. By following the HCS-10 standard, it enables interoperable agent communication with AI-powered understanding and response generation.
