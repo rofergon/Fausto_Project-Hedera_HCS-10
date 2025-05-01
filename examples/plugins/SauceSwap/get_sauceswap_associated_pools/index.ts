@@ -2,6 +2,7 @@ import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import axios from 'axios';
 
+// Interface defining token information structure
 interface TokenInfo {
   id: string;
   name: string;
@@ -14,6 +15,7 @@ interface TokenInfo {
   twitterHandle?: string;
 }
 
+// Interface defining pool information structure
 interface PoolInfo {
   id: number;
   contractId: string;
@@ -31,10 +33,12 @@ interface PoolInfo {
   tokenReserveB: string;
 }
 
+// Tool for retrieving pools associated with a specific token on SauceSwap
 export class GetSauceSwapAssociatedPoolsTool extends StructuredTool {
   name = 'get_sauceswap_associated_pools';
   description = 'Get all pools associated with a specific token ID on SauceSwap';
 
+  // Define input schema with Zod
   schema = z.object({
     tokenId: z.string().describe('The token ID to get associated pools for (e.g., "0.0.731861")'),
     network: z.enum(['mainnet', 'testnet'])
@@ -42,12 +46,15 @@ export class GetSauceSwapAssociatedPoolsTool extends StructuredTool {
       .describe('The network to query (mainnet or testnet)')
   });
 
+  // Main method that fetches and processes pool data
   async _call(input: z.infer<typeof this.schema>): Promise<string> {
     try {
+      // Select API URL based on network
       const baseUrl = input.network === 'mainnet' 
         ? 'https://api.saucerswap.finance'
         : 'https://testnet-api.saucerswap.finance';
 
+      // Fetch pools data from API
       const response = await axios.get<PoolInfo[]>(`${baseUrl}/tokens/associated-pools/${input.tokenId}`);
       const pools = response.data;
 
@@ -55,7 +62,7 @@ export class GetSauceSwapAssociatedPoolsTool extends StructuredTool {
         return `No pools found containing token ${input.tokenId}`;
       }
 
-      // Format the response in a readable way
+      // Transform the data into a more readable format
       const formattedPools = pools.map(pool => ({
         poolId: pool.id,
         contractId: pool.contractId,
@@ -84,6 +91,7 @@ export class GetSauceSwapAssociatedPoolsTool extends StructuredTool {
 
       return JSON.stringify(formattedPools, null, 2);
     } catch (error) {
+      // Handle errors, including 404 for tokens with no pools
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         return `Token ${input.tokenId} not found or has no associated pools`;
       }
