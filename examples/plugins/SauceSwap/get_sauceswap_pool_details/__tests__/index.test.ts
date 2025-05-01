@@ -54,14 +54,22 @@ describe('GetSauceSwapPoolDetailsTool', () => {
     mockedAxios.get.mockResolvedValueOnce({ data: mockPool });
 
     const result = await tool._call({ poolId: 1, network: 'mainnet' });
-    const parsed = JSON.parse(result);
-
+    
     expect(mockedAxios.get).toHaveBeenCalledWith('https://api.saucerswap.finance/pools/1');
-    expect(parsed.poolId).toBe(1);
+    expect(result).toContain('Pool 1 (TKA-TKB) details:');
+    expect(result).toContain('Use command "list pools"');
+    
+    const jsonStart = result.indexOf('{');
+    const jsonEnd = result.lastIndexOf('}') + 1;
+    const jsonStr = result.substring(jsonStart, jsonEnd);
+    const parsed = JSON.parse(jsonStr);
+    
+    expect(parsed.id).toBe(1);
     expect(parsed.contractId).toBe('0.0.123456');
-    expect(parsed.lpToken.name).toBe('SS-LP TOKEN-A - TOKEN-B');
-    expect(parsed.tokenA.symbol).toBe('TKA');
-    expect(parsed.tokenB.symbol).toBe('TKB');
+    expect(parsed.pair).toBe('TKA-TKB');
+    expect(parsed.lpToken.symbol).toBe('TOKEN-A - TOKEN-B');
+    expect(parsed.tokens.TKA.id).toBe('0.0.123458');
+    expect(parsed.tokens.TKB.id).toBe('0.0.123459');
   });
 
   it('should handle pool not found error', async () => {
