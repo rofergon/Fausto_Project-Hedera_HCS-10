@@ -37,11 +37,27 @@ export class SendMessageTool extends StructuredTool {
   async _call(input: z.infer<typeof this.schema>): Promise<string> {
     try {
       // Check if this is an HRL message for OpenConvAI rendering
-      if (input.isHrl === true && input.message.startsWith('hcs://')) {
+      if (input.isHrl === true && (input.message.startsWith('hcs://0.0.') || input.message.startsWith('hcs://1/0.0.') || input.message.startsWith('hcs://1/'))) {
         // For OpenConvAI to render images properly:
-        // 1. Send just the HRL as the message
+        // 1. Send just the HRL as the message to the conversation topic (not to the HRL topic)
+        // Make sure we're using the correct conversation topicId provided in input.topicId
+        this.logger.info(`Sending HRL image ${input.message} to conversation topic ${input.topicId}`);
+        
+        // Validate that topicId is not derived from the HRL and is a valid Hedera topic ID
+        const topicIdPattern = /^0\.0\.[0-9]+$/;
+        if (!topicIdPattern.test(input.topicId)) {
+          throw new Error(`Invalid conversation topic ID format: ${input.topicId}. Must be in format 0.0.XXXXX`);
+        }
+        
+        // Ensure we're not trying to send to the topic mentioned in the HRL
+        const hrlTopicExtract = input.message.match(/hcs:\/\/(?:1\/)?([0-9]+\.[0-9]+\.[0-9]+)/);
+        if (hrlTopicExtract && hrlTopicExtract[1] === input.topicId) {
+          this.logger.warn(`Attempted to send HRL message to its own topic. HRL: ${input.message}, Topic: ${input.topicId}`);
+          throw new Error(`Cannot send HRL message to its own topic (${input.topicId}). Must use the conversation topic.`);
+        }
+        
         const result = await this.client.sendMessage(
-          input.topicId,
+          input.topicId, // Use the conversation topic ID, not the HRL topic
           input.message,  // Only the HRL as the message
           input.memo || "Image from SauceSwap chart"
         );
@@ -49,13 +65,13 @@ export class SendMessageTool extends StructuredTool {
         // 2. Then optionally send the descriptive text in a separate message
         if (input.memo) {
           await this.client.sendMessage(
-            input.topicId,
+            input.topicId, // Again, use the conversation topic ID
             input.memo,
             "Additional details"
           );
         }
         
-        return `HRL image sent successfully. The image will render in OpenConvAI viewers.`;
+        return `HRL image sent successfully to topic ${input.topicId}. The image will render in OpenConvAI viewers.`;
       }
       
       // Standard message handling
@@ -71,6 +87,7 @@ export class SendMessageTool extends StructuredTool {
         return 'Message sent';
       }
     } catch (error) {
+      this.logger.error(`Error sending message to topic ${input.topicId}: ${error instanceof Error ? error.message : String(error)}`);
       return `Error sending message: ${error instanceof Error ? error.message : String(error)}`;
     }
   }

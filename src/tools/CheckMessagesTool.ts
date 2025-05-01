@@ -127,8 +127,8 @@ Use 'lastMessagesCount' to specify how many latest messages to retrieve (default
       for (const msg of messagesToProcess) {
         let content = msg.data;
         try {
-          // Check for inscription HRL
-          if (typeof content === 'string' && content.startsWith('hcs://')) {
+          // Check for inscription HRL (both formats)
+          if (typeof content === 'string' && (content.startsWith('hcs://0.0.') || content.startsWith('hcs://1/0.0.') || content.startsWith('hcs://1/'))) {
             this.logger.debug(`Resolving inscribed message: ${content}`);
             content = await this.hcsClient.getMessageContent(content);
             this.logger.debug(`Resolved content length: ${content?.length}`);

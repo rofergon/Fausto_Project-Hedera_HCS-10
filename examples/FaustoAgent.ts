@@ -87,7 +87,7 @@ To generate price charts for SauceSwap pools, use the 'get_sauceswap_chart' tool
 
 IMPORTANT: When using sendDirectlyInChat=true, the tool will return just the HRL link. When you get this link,
 you must use the send_message tool with isHrl=true to properly send the image for rendering. This ensures
-the image will display correctly in OpenConvAI. The HRL format will be hcs://0.0.XXXXXX where XXXXXX is the topic ID.
+the image will display correctly in OpenConvAI. The HRL format will be either hcs://0.0.XXXXXX or hcs://1/XXXXXX where XXXXXX is the topic ID.
 
 Example queries the tool can handle:
 - "Generate a 4-hour chart for pool 1"
@@ -376,6 +376,14 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       return;
     }
 
+    // Validate that topicId has the expected format (0.0.XXXXX)
+    if (!topicId.match(/^0\.0\.[0-9]+$/)) {
+      console.error(`Invalid conversation topic ID format: ${topicId}`);
+      return;
+    }
+
+    console.log(`Processing message #${sequenceNumber} in topic ${topicId}: ${message.data.substring(0, 100)}${message.data.length > 100 ? '...' : ''}`);
+
     // Get or initialize the processed messages set for this topic
     let processedSet = processedMessages.get(topicId);
     if (!processedSet) {
@@ -403,8 +411,6 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
 
     // Mark message as in process
     inProcessSet.add(sequenceNumber);
-
-    console.log(`Processing message #${sequenceNumber}: ${message.data.substring(0, 100)}${message.data.length > 100 ? '...' : ''}`);
 
     let messageText = message.data;
     try {
@@ -462,13 +468,28 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
     }
 
     // Check if the response contains an HRL link
-    const hrlRegex = /(hcs:\/\/0\.0\.[0-9]+)/i;
+    const hrlRegex = /(hcs:\/\/1\/(?:0\.0\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+))/i;
     const hrlMatch = outputText.match(hrlRegex);
     
     // Special handling for HRL links (images)
     if (hrlMatch && hrlMatch[1]) {
       const hrlLink = hrlMatch[1];
       console.log(`Found HRL link in response: ${hrlLink}`);
+      
+      // Validate the conversation topicId (not the HRL topic)
+      if (!topicId.match(/^0\.0\.[0-9]+$/)) {
+        console.error(`Invalid conversation topic ID format: ${topicId} when sending HRL link`);
+        // Fall back to normal response if topicId is invalid
+        await sendMessageTool.invoke({
+          topicId: topicId,
+          message: `[Reply to #${sequenceNumber}] ${outputText}`,
+          memo: `Reply to message #${sequenceNumber}`,
+          disableMonitoring: true,
+        });
+        return;
+      }
+      
+      console.log(`Will send HRL image ${hrlLink} to conversation topic ${topicId}`);
       
       try {
         // Step 1: Send only the HRL link for rendering

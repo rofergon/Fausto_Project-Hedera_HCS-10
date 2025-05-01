@@ -141,7 +141,7 @@ Latest Candlestick:
           }
           
           // Compress the image before uploading
-          const quality = input.quality || 80;
+          const quality = input.quality || 60;
           const compressedBuffer = await this.compressImage(outputPath, quality);
           
           // Get credentials from the HCS10Client
@@ -172,7 +172,7 @@ Latest Candlestick:
           
           if (inscriptionResult.confirmed && inscriptionResult.inscription) {
             // Format proper HRL with standard number (hcs://1/{topicId})
-            hrlLink = `hcs://0.0.${inscriptionResult.inscription.topic_id.split('.').pop()}`;
+            hrlLink = `hcs://1/${inscriptionResult.inscription.topic_id}`;
             
             // If sendDirectlyInChat is true, just return the proper HRL format
             // This allows OpenConvAI to render it directly

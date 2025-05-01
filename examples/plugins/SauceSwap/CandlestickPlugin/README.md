@@ -1,109 +1,109 @@
 # SauceSwap Chart Plugin
 
-Este plugin genera gráficos de velas (candlestick) para pools de SauceSwap, permitiendo visualizar datos históricos de precios, volumen y liquidez.
+This plugin generates candlestick charts for SauceSwap pools, allowing visualization of historical price, volume, and liquidity data.
 
-## Características
+## Features
 
-- **Gráficos de velas** con formato profesional
-- **Generación automática** de rangos de tiempo e intervalos
-- **Cálculo estadístico** (máximos, mínimos, promedios)
-- **Visualización de volumen**
-- **Formato temporal flexible** ("1h", "4h", "1d", "1w", "3d 12h", etc.)
-- **Guardado local** de imágenes como PNG
+- **Candlestick charts** with professional formatting
+- **Automatic generation** of time ranges and intervals
+- **Statistical calculation** (maximums, minimums, averages)
+- **Volume visualization**
+- **Flexible time format** ("1h", "4h", "1d", "1w", "3d 12h", etc.)
+- **Local saving** of images as PNG
 
-## Instalación
+## Installation
 
-1. Asegúrate de tener todas las dependencias instaladas:
+1. Make sure you have all dependencies installed:
 ```bash
 npm install canvas axios
 ```
 
-2. Registra el plugin en tu aplicación:
+2. Register the plugin in your application:
 ```typescript
 import SauceSwapChartPlugin from './plugins/SauceSwap/CandlestickPlugin';
 
-// En tu función de inicialización
+// In your initialization function
 const chartPlugin = new SauceSwapChartPlugin();
 await pluginRegistry.registerPlugin(chartPlugin);
 ```
 
-## Uso
+## Usage
 
-### Desde la línea de comandos
+### From the command line
 
-Para probar el generador de gráficos puedes usar:
+To test the chart generator you can use:
 
 ```bash
 npm run sauceswap-chart-test
 ```
 
-Esto generará varios gráficos de ejemplo para las pools 1 y 2 con diferentes intervalos de tiempo.
+This will generate several example charts for pools 1 and 2 with different time intervals.
 
-### En código
+### In code
 
 ```typescript
 import { CandlestickFetcher } from './utils/candlestickFetcher';
 import { ChartRenderer } from './utils/chartRenderer';
 
-// Crear instancias
+// Create instances
 const fetcher = new CandlestickFetcher('mainnet');
 const renderer = new ChartRenderer();
 
-// Obtener datos
+// Get data
 const chartData = await fetcher.getChartData(
   1,                 // Pool ID
-  '1d',              // Rango de tiempo
-  false              // Invertido (opcional)
+  '1d',              // Time range
+  false              // Inverted (optional)
 );
 
-// Guardar gráfico
-const outputPath = './charts/mi_grafico.png';
+// Save chart
+const outputPath = './charts/my_chart.png';
 await renderer.renderChart(chartData, outputPath);
 ```
 
-### Como herramienta del agente
+### As an agent tool
 
-El agente puede usar la herramienta `get_sauceswap_chart` para generar gráficos. Ejemplos de consultas:
+The agent can use the `get_sauceswap_chart` tool to generate charts. Example queries:
 
-- "Muéstrame el gráfico del pool 1 de las últimas 4 horas"
-- "Dame el chart del pool 2 de la última semana"
-- "Quiero ver el gráfico del pool 3 de los últimos 2 días"
-- "Genera un gráfico de 5 días para el pool 4"
+- "Show me the chart for pool 1 for the last 4 hours"
+- "Give me the chart for pool 2 from the last week"
+- "I want to see the chart for pool 3 from the last 2 days"
+- "Generate a 5-day chart for pool 4"
 
-## Estructura de archivos
+## File Structure
 
 ```
 CandlestickPlugin/
-  ├── index.ts                   # Punto de entrada del plugin
-  ├── plugin.json                # Configuración del plugin
+  ├── index.ts                   # Plugin entry point
+  ├── plugin.json                # Plugin configuration
   ├── __tests__/                 # Tests
-  │   └── chartTest.ts           # Test del generador de gráficos
+  │   └── chartTest.ts           # Chart generator test
   └── utils/
-      ├── candlestickFetcher.ts  # Obtención de datos
-      ├── chartRenderer.ts       # Generación visual
-      └── timeCalculations.ts    # Utilidades de tiempo
+      ├── candlestickFetcher.ts  # Data retrieval
+      ├── chartRenderer.ts       # Visual generation
+      └── timeCalculations.ts    # Time utilities
 ```
 
-## Personalización
+## Customization
 
-### Tamaño y estilo
+### Size and style
 
-Puedes ajustar las dimensiones y colores del gráfico:
+You can adjust the chart dimensions and colors:
 
 ```typescript
 const renderer = new ChartRenderer({
-  width: 1600,       // Ancho en píxeles
-  height: 900,       // Alto en píxeles
-  padding: 60,       // Espaciado interior
-  priceAxisWidth: 100, // Ancho del eje Y
-  timeAxisHeight: 80   // Alto del eje X
+  width: 1600,       // Width in pixels
+  height: 900,       // Height in pixels
+  padding: 60,       // Inner spacing
+  priceAxisWidth: 100, // Width of Y axis
+  timeAxisHeight: 80   // Height of X axis
 });
 ```
 
-### Directorio de salida
+### Output directory
 
 ```typescript
-// En el plugin principal
+// In the main plugin
 this.outputDir = context.config.chartOutputDir || './charts';
 ```
 
@@ -113,9 +113,9 @@ this.outputDir = context.config.chartOutputDir || './charts';
 
 ```typescript
 getChartData(
-  poolId: number,        // ID del pool
-  timeRange: string,     // Rango de tiempo (ej: "1d", "4h", "1w")
-  inverted: boolean = false  // Invertir cálculo de precio
+  poolId: number,        // Pool ID
+  timeRange: string,     // Time range (e.g.: "1d", "4h", "1w")
+  inverted: boolean = false  // Invert price calculation
 ): Promise<CandlestickChartData>
 ```
 
@@ -123,11 +123,11 @@ getChartData(
 
 ```typescript
 renderChart(
-  data: CandlestickChartData,  // Datos del gráfico
-  outputPath: string           // Ruta de salida para guardar PNG
+  data: CandlestickChartData,  // Chart data
+  outputPath: string           // Output path to save PNG
 ): Promise<string>
 ```
 
-## Licencia
+## License
 
-Este plugin está bajo la licencia Apache-2.0. 
+This plugin is under the Apache-2.0 license. 

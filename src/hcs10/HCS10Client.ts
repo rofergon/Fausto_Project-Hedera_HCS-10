@@ -326,7 +326,7 @@ export class HCS10Client {
 
   /**
    * Retrieves content from an inscribed message using the standard SDK client.
-   * @param inscriptionIdOrData - The inscription ID (hcs://...) or potentially raw data string.
+   * @param inscriptionIdOrData - The inscription ID (either hcs://0.0.{topicId} or hcs://1/{topicId} format) or potentially raw data string.
    * @returns The resolved message content.
    */
   public async getMessageContent(inscriptionIdOrData: string): Promise<string> {

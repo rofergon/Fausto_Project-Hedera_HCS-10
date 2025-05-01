@@ -347,7 +347,7 @@ async function uploadToHedera(imageBuffer: Buffer, quality: number = 80): Promis
     const result = await inscription.submit();
     
     if (result.success) {
-      // HRL format: hcs://0.0.XXXXX (Hedera Resource Locator)
+      // HRL formats: either hcs://0.0.XXXXX or hcs://1/XXXXX (Hedera Resource Locator)
       return `hcs://${result.topicId}`;
     } else {
       throw new Error(`Inscription failed: ${result.error}`);
@@ -372,7 +372,7 @@ The system implements sophisticated message handling:
 ### Key Code for HRL Messages (Images)
 ```typescript
 // Detection of HRL links for images
-const hrlRegex = /(hcs:\/\/0\.0\.[0-9]+)/i;
+const hrlRegex = /(hcs:\/\/(?:0\.0\.[0-9]+|1\/[0-9]+))/i;
 const hrlMatch = outputText.match(hrlRegex);
 
 if (hrlMatch && hrlMatch[1]) {
@@ -483,6 +483,219 @@ The architecture allows several extensions:
 3. **Multi-Agent Support**: Communication between multiple specialized agents
 4. **E2E Encryption**: Implementation of end-to-end encryption for private messages
 5. **IPFS Storage**: Integration with IPFS for larger images
+
+## Usage Examples
+
+Here are practical examples of how users can interact with the Fausto agent using SauceSwap plugins:
+
+### Basic Pool Information
+
+```
+User: Show me the top 10 liquidity pools on SauceSwap.
+Fausto: Here are the current SauceSwap Pools (mainnet) - Page 1/5 (Total: 42)
+
+ID | Pair | Token Prices | LP Price
+---|------|-------------|--------
+1 | HBAR-USDC | HBAR: $0.10, USDC: $1.00 | $53.24
+2 | HBAR-SAUCE | HBAR: $0.10, SAUCE: $0.45 | $18.75
+3 | USDC-SAUCE | USDC: $1.00, SAUCE: $0.45 | $28.90
+...
+
+Use command "pool details 1" to see detailed information about a specific pool.
+```
+
+### Detailed Pool Analysis
+
+```
+User: Give me more details about the HBAR-USDC pool.
+Fausto: Let me get that information for you.
+
+Pool 1 (HBAR-USDC) details:
+
+{
+  "id": 1,
+  "contractId": "0.0.738891",
+  "pair": "HBAR-USDC",
+  "lpToken": {
+    "symbol": "HBAR-USDC-LP",
+    "priceUsd": 53.24,
+    "totalReserve": "8945023.482"
+  },
+  "tokens": {
+    "HBAR": {
+      "id": "0.0.732831",
+      "priceUsd": 0.103,
+      "reserve": "45328902.482",
+      "website": "https://hedera.com"
+    },
+    "USDC": {
+      "id": "0.0.456858",
+      "priceUsd": 1.00,
+      "reserve": "4678345.32",
+      "website": "https://www.circle.com/en/usdc"
+    }
+  }
+}
+```
+
+### Token Research
+
+```
+User: I'm interested in the SAUCE token. What can you tell me about it?
+Fausto: Here's what I found about the SAUCE token:
+
+{
+  "id": "0.0.731861",
+  "name": "SaucerSwap Token",
+  "symbol": "SAUCE",
+  "decimals": 8,
+  "priceUsd": 0.45,
+  "price": "$0.45",
+  "description": "SAUCE is the governance and utility token of the SaucerSwap DEX ecosystem on Hedera.",
+  "dueDiligenceComplete": true,
+  "isFeeOnTransferToken": false,
+  "website": "https://saucerswap.finance",
+  "twitterHandle": "SaucerSwap",
+  "icon": "https://assets.saucerswap.finance/tokens/SAUCE.png"
+}
+
+Would you like to see the pools where you can trade SAUCE?
+```
+
+### Multi-Pool Analysis
+
+```
+User: Find all pools that contain the SAUCE token and compare them.
+Fausto: I found 3 pools containing the SAUCE token (0.0.731861):
+
+[
+  {
+    "poolId": 2,
+    "contractId": "0.0.738892",
+    "lpToken": {
+      "symbol": "HBAR-SAUCE-LP",
+      "priceUsd": 18.75,
+      "totalReserve": "1234567.89"
+    },
+    "tokenA": {
+      "id": "0.0.732831", // HBAR
+      "name": "Hbar",
+      "symbol": "HBAR",
+      "priceUsd": 0.103,
+      "reserve": "9876543.21"
+    },
+    "tokenB": {
+      "id": "0.0.731861", // SAUCE
+      "name": "SaucerSwap Token",
+      "symbol": "SAUCE",
+      "priceUsd": 0.45,
+      "reserve": "2345678.90"
+    }
+  },
+  {
+    "poolId": 3,
+    "contractId": "0.0.738893",
+    "lpToken": {
+      "symbol": "USDC-SAUCE-LP",
+      "priceUsd": 28.90,
+      "totalReserve": "3456789.01"
+    },
+    "tokenA": {
+      "id": "0.0.456858", // USDC
+      "name": "USD Coin",
+      "symbol": "USDC",
+      "priceUsd": 1.00,
+      "reserve": "1500000.00"
+    },
+    "tokenB": {
+      "id": "0.0.731861", // SAUCE
+      "name": "SaucerSwap Token",
+      "symbol": "SAUCE",
+      "priceUsd": 0.45,
+      "reserve": "3333333.33"
+    }
+  },
+  // Additional pool info...
+]
+
+The HBAR-SAUCE pool has the highest liquidity with 2.3M SAUCE tokens. The USDC-SAUCE pool offers direct stablecoin pairing.
+```
+
+### Price Chart Generation
+
+```
+User: Can you show me a price chart for the HBAR-USDC pool over the last week?
+Fausto: Here's the candlestick chart for Pool #1 (HBAR-USDC) over the last 7 days:
+
+[Chart Image appears here]
+
+The chart shows a price range between $0.095 and $0.11 per HBAR in terms of USDC. There was a significant price increase on Wednesday followed by consolidation over the weekend. Volume has been consistent throughout the period.
+```
+
+### Investment Analysis
+
+```
+User: I'm considering providing liquidity to the HBAR-USDC pool. What information should I consider?
+Fausto: Here are key factors to consider before providing liquidity to the HBAR-USDC pool (ID: 1):
+
+1. **Current Stats**:
+   - Total Liquidity: $4.7M USDC and 45.3M HBAR
+   - LP Token Price: $53.24
+   - Trading Volume (24h): $320,452
+
+2. **Impermanent Loss Risk**:
+   - HBAR has 30-day volatility of 8.2%
+   - As a stablecoin pair, you're exposed to HBAR price movements
+   - During the past week, IL would have been approximately -1.3%
+
+3. **Fee Income**:
+   - Current APR from fees: ~7.2%
+   - Based on 0.25% trading fee and current volume
+
+4. **Current Pool Ratio**:
+   - 45.3M HBAR : 4.7M USDC
+   - You would need to provide assets in this exact ratio
+
+Would you like me to generate a price chart to analyze recent volatility patterns?
+```
+
+### Advanced Queries
+
+```
+User: Compare the performance of SAUCE across all liquidity pools over the last month.
+Fausto: Analyzing SAUCE token (0.0.731861) performance across all pools over the last month:
+
+**Price Performance**:
+- Current Price: $0.45
+- 30 days ago: $0.39
+- Change: +15.4%
+
+**Pool Comparison**:
+1. **HBAR-SAUCE Pool (ID: 2)**:
+   - Volume (30d): $1.2M
+   - Liquidity: $2.34M
+   - Price impact (100k SAUCE): 0.8%
+   
+2. **USDC-SAUCE Pool (ID: 3)**:
+   - Volume (30d): $1.8M
+   - Liquidity: $3.33M
+   - Price impact (100k SAUCE): 0.6%
+
+3. **HSUITE-SAUCE Pool (ID: 7)**:
+   - Volume (30d): $450k
+   - Liquidity: $980k
+   - Price impact (100k SAUCE): 2.1%
+
+**Analysis**:
+- USDC-SAUCE has the highest volume and deepest liquidity
+- HBAR-SAUCE shows slightly higher price volatility
+- For large trades, USDC-SAUCE offers the best execution price
+
+Here's a chart comparing price movement across all three pools:
+[Chart Image appears here]
+```
+
+These examples demonstrate how the Fausto agent can provide comprehensive DeFi analytics by combining data from multiple SauceSwap plugins, generating visual charts, and offering contextual analysis to help users make informed decisions.
 
 ## Conclusion
 
