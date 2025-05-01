@@ -27,7 +27,7 @@
     "release": "npm publish --access public",
     "cli-demo": "tsx examples/cli-demo.ts",
     "interactive-demo": "tsx examples/interactive-demo.ts",
-    "langchain-demo": "tsx examples/langchain-demo.ts",
+    "fausto-agent": "tsx examples/FaustoAgent.ts",
     "plugin-demo": "tsx examples/plugin-system-example.ts",
     "plugin-weather": "tsx examples/plugins/weather/index.ts",
     "plugin-defi": "tsx examples/plugins/defi/index.ts",
