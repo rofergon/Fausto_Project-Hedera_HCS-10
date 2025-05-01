@@ -1,4 +1,4 @@
-# SauceSwap LangChain Demo
+# SauceSwap Fausto Project
 
 > This project is a fork of the original repository [hashgraph-online/standards-agent-kit](https://github.com/hashgraph-online/standards-agent-kit) with specific extensions and customizations for SauceSwap.
 
@@ -87,6 +87,136 @@ if (hrlMatch && hrlMatch[1]) {
 }
 ```
 
+## 🔍 HCS-10 Architecture Overview
+
+The Fausto project leverages the HCS-10 OpenConvAI Standard for secure, decentralized agent communication on Hedera.
+
+```
+┌─────────────────────────────┐       ┌──────────────────────────┐
+│      Agent Registration     │       │    Message Processing    │
+│ ┌─────────────────────────┐ │       │ ┌────────────────────┐   │
+│ │  Register new agents    │ │       │ │ Message detection  │   │
+│ │  Create HCS topics      │◄┼───────┼─┤ Sequence tracking  │   │
+│ │  Generate account & key │ │       │ │ Duplicate handling │   │
+│ └─────────────────────────┘ │       │ └────────────────────┘   │
+└─────────────────────────────┘       └──────────────┬───────────┘
+                                                    │
+               ┌──────────────────────────────────┐ │
+               │       Connection Management       │ │
+               │ ┌────────────────────────────┐   │ │
+               │ │Monitor connection requests │◄──┼─┘
+               │ │Accept incoming connections │   │
+               │ │Maintain connection states  │   │
+               │ └────────────────────────────┘   │
+               └──────────────────┬───────────────┘
+                                  │
+┌────────────────────────────────▼────────────────────────────┐
+│                     HCS-10 Message Flow                      │
+│                                                              │
+│  1. Client sends message to topic via Hedera Consensus Svc   │
+│  2. Message is ordered and timestamped on the ledger         │
+│  3. All subscribers receive the consistent message stream    │
+│  4. Message is processed by Fausto agent                     │
+│  5. Response flows back through the same HCS channel         │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Key components:
+- Each agent has three HCS topics: inbound, outbound, and profile
+- Connections follow a request-accept-confirm protocol
+- Message processing uses sequence tracking to prevent duplicates
+- HRL links enable image sharing via HCS-3 inscriptions
+
+## 🧩 SauceSwap Plugin Architecture
+
+The SauceSwap plugins were developed following a modular architecture pattern that enables seamless integration with both the LangChain framework and HCS-10 communication.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      SauceSwap Plugin System                     │
+├───────────────┬─────────────────┬──────────────┬────────────────┤
+│ Pool List     │ Pool Details    │ Token Details│ Associated     │
+│ Plugin        │ Plugin          │ Plugin       │ Pools Plugin   │
+├───────────────┴─────────────────┴──────────────┴────────────────┤
+│                                                                  │
+│                     Candlestick Chart Plugin                     │
+│                                                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │ Chart       │  │ Data        │  │ Hedera Integration      │  │
+│  │ Generation  │  │ Retrieval   │  │ ┌─────────────────────┐ │  │
+│  │ ┌─────────┐ │  │ ┌─────────┐ │  │ │ HCS-3 Inscription   │ │  │
+│  │ │ Canvas  │ │  │ │ API     │ │  │ │ Image Upload        │ │  │
+│  │ │ Renderer│ │  │ │ Client  │ │  │ │ HRL Generation      │ │  │
+│  │ └─────────┘ │  │ └─────────┘ │  │ └─────────────────────┘ │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Plugin Development Process
+
+The SauceSwap plugins were developed following these steps:
+
+1. **Planning**: Each plugin was designed to serve a specific purpose (listing pools, getting pool details, generating charts)
+2. **Structured Organization**: Plugins follow a consistent directory structure:
+   ```
+   examples/plugins/SauceSwap/
+   ├── index.ts                         # Main plugin entry point
+   ├── get_sauceswap_pools/             # Plugin for listing pools
+   ├── get_sauceswap_pool_details/      # Plugin for pool details
+   └── CandlestickPlugin/               # Advanced chart generation
+       ├── utils/                       # Helper functions
+       ├── services/                    # API services
+       └── __tests__/                   # Unit tests
+   ```
+3. **Tool Implementation**: Each plugin extends LangChain's `StructuredTool` class
+4. **Error Handling**: Robust error handling for API failures and edge cases
+5. **Integration**: Registration with the main agent through the plugin registry
+
+### Spotlight: CandlestickChart Plugin
+
+The chart plugin is the most sophisticated, implementing:
+
+1. **Historical Data Retrieval**:
+   - Fetches OHLC (Open-High-Low-Close) price data from SauceSwap API
+   - Supports various time ranges and intervals
+   - Handles pagination and data normalization
+
+2. **Chart Generation**:
+   - Uses Canvas API to render high-quality candlestick charts
+   - Implements price scaling and time axis formatting
+   - Supports customizable chart styling and options
+
+3. **Hedera Integration**:
+   - Uploads chart images to Hedera using HCS-3 inscriptions
+   - Generates Hedera Resource Locator (HRL) links for sharing
+   - Optimizes image compression for on-chain storage
+
+4. **OpenConvAI Rendering**:
+   - Special HRL handling for in-chat image rendering
+   - Two-step message process for maximum compatibility
+   - Separation of image data and contextual text
+
+Example tool definition:
+```typescript
+export class GetSauceSwapChartTool extends StructuredTool {
+  name = 'get_sauceswap_chart';
+  description = 'Generate a candlestick chart for SauceSwap pools with various time ranges';
+  
+  schema = z.object({
+    poolId: z.number().describe('ID of the pool to chart'),
+    timeRange: z.string().describe('Time range (e.g., "1h", "4h", "1d", "1w")'),
+    inverted: z.boolean().optional().describe('Invert price calculation'),
+    uploadToHedera: z.boolean().optional().describe('Upload chart to Hedera'),
+    sendDirectlyInChat: z.boolean().optional().describe('Send directly to chat'),
+    quality: z.number().min(1).max(100).optional().describe('Image quality')
+  });
+  
+  async _call(input: z.infer<typeof this.schema>): Promise<string> {
+    // Implementation details for chart generation
+  }
+}
+```
+
 ## How to Run the Project
 
 ### Prerequisites
@@ -121,10 +251,10 @@ if (hrlMatch && hrlMatch[1]) {
    OPENAI_API_KEY=sk-xxxxxxxxxx
    ```
 
-### Run the LangChain Demo
+### Run the FaustoAgent 
 
 ```bash
-npm run langchain-demo
+npm run fausto-agent
 ```
 
 When starting, the application:
@@ -145,105 +275,11 @@ In automated mode, the agent:
 ## Customization
 
 To modify the agent's behavior:
-- Adjust `AGENT_PERSONALITY` in `langchain-demo.ts` to change the instructions
+- Adjust `AGENT_PERSONALITY` in `FaustoAgent.ts` to change the instructions
 - Modify `WELCOME_MESSAGE` to customize the initial message
 - Create additional plugins in the `examples/plugins` folder
 
-## 🔍 Plugin Development Guide
-
-> ### Implementation of SauceSwap Plugins
-> 
-> The SauceSwap plugins were developed following the plugin architecture pattern of the base project. Each plugin functions as an independent module that implements the system's `Plugin` interface, allowing seamless integration with the LangChain framework and HCS-10 communication.
-> 
-> #### SauceSwap folder structure
-> ```
-> examples/plugins/SauceSwap/
-> ├── index.ts                          # Plugin entry point
-> ├── CandlestickPlugin/                # Candlestick chart plugin
-> │   ├── utils/                        # Helper functions for charts
-> │   ├── services/                     # Services for historical data
-> │   └── __tests__/                    # Unit tests
-> ├── get_sauceswap_pools/              # Plugin for listing pools
-> ├── get_sauceswap_pool_details/       # Plugin for pool details
-> ├── get_sauceswap_token_details/      # Plugin for token information
-> └── get_sauceswap_associated_pools/   # Plugin for pools associated with a token
-> ```
-> 
-> #### Development of the Chart Plugin (CandlestickPlugin)
-> 
-> The price chart plugin was the most complex component, implementing:
-> 
-> 1. **Historical data retrieval**: Queries to the SauceSwap API to get OHLC (Open-High-Low-Close) data
-> 2. **Chart generation**: Using the `canvas` library to create high-quality PNG images
-> 3. **Hedera storage**: Image uploading using the HCS-3 standard for inscriptions
-> 4. **Chat integration**: Special handling of HRL links for rendering in OpenConvAI
-> 
-> The implementation leverages the HCS-10 messaging system to send and receive both text and images, using a two-step mechanism for charts:
-> 
-> ```typescript
-> // Example of sending a chart via HCS-10
-> if (uploadToHedera) {
->   // First upload the image to Hedera with HCS-3
->   const hrlLink = await this.uploadToHedera(chartBuffer, quality);
->   
->   // If direct chat sending is requested, return only the HRL link
->   if (sendDirectlyInChat) {
->     return hrlLink;
->   } else {
->     return {
->       chartInfo: { /* Chart information */ },
->       hrlLink
->     };
->   }
-> }
-> ```
-> 
-> #### How to Implement New Plugins
-> 
-> To develop similar new plugins:
-> 
-> 1. **Create the folder structure**:
->    ```bash
->    mkdir -p examples/plugins/MyPlugin/{utils,services,__tests__}
->    ```
-> 
-> 2. **Implement the Plugin interface**:
->    ```typescript
->    import { Plugin, PluginContext } from '../../../src/plugins';
->    
->    export default class MyPlugin implements Plugin {
->      id = 'my-plugin';
->      name = 'My Custom Plugin';
->      description = 'Description of my plugin';
->      tools = [];
->      
->      constructor() {
->        this.tools = [
->          /* Define LangChain tools here */
->        ];
->      }
->      
->      async initialize(context: PluginContext): Promise<void> {
->        /* Plugin initialization */
->      }
->    }
->    ```
-> 
-> 3. **Register the plugin** in `examples/langchain-demo.ts`:
->    ```typescript
->    import MyPlugin from './plugins/MyPlugin';
->    // ...
->    await pluginRegistry.registerPlugin(new MyPlugin());
->    ```
-> 
-> 4. **Test the plugin**:
->    ```bash
->    npm run langchain-demo
->    ```
-> 
-> This modular approach allows easy extension of the agent's functionality without modifying its core, following the design principles of the original project.
-
 ## Conclusion
 
-This demo shows how to integrate LangChain with the HCS-10 standard to create autonomous agents that interact with DeFi data on Hedera. The plugin system allows easy extension of functionality for new use cases.
+This project demonstrates how to integrate LangChain with the HCS-10 standard to create autonomous agents that interact with DeFi data on Hedera. The modular plugin architecture allows easy extension of functionality, as showcased by the SauceSwap plugins, particularly the sophisticated chart generation capabilities.
 
