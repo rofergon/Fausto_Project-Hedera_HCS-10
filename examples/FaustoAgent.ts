@@ -1,8 +1,10 @@
 import * as dotenv from 'dotenv';
 import readline from 'readline';
 
+// Core HCS10 client for Hedera consensus service interactions
 import { HCS10Client } from '../src/hcs10/HCS10Client';
 
+// Tools for managing connections and messaging on the Hedera network
 import { ConnectionMonitorTool } from '../src/tools/ConnectionMonitorTool';
 import { AcceptConnectionRequestTool } from '../src/tools/AcceptConnectionRequestTool';
 import { ManageConnectionRequestsTool } from '../src/tools/ManageConnectionRequestsTool';
@@ -17,14 +19,14 @@ import { SendMessageTool } from '../src/tools/SendMessageTool';
 import { IStateManager } from '../src/state/state-types';
 import { OpenConvaiState } from '../src/state/open-convai-state';
 
-// Import plugin system components
+// Plugin system for extending agent capabilities
 import { PluginRegistry, PluginContext } from '../src/plugins';
 import WeatherPlugin from './plugins/weather';
 import DeFiPlugin from './plugins/defi';
 import { HbarPricePlugin } from '../src/plugins/hedera/HbarPricePlugin';
 import SauceSwapPlugin from './plugins/SauceSwap/index';
 
-// --- LangChain Imports ---
+// LangChain components for AI-powered conversational capabilities
 import { ChatOpenAI } from '@langchain/openai';
 import { AgentExecutor, createOpenAIToolsAgent } from 'langchain/agents';
 import { ConversationTokenBufferMemory } from 'langchain/memory';
@@ -38,6 +40,9 @@ import { Logger } from '@hashgraphonline/standards-sdk';
 
 dotenv.config();
 
+/**
+ * Represents an agent identity on the Hedera network
+ */
 interface AgentIdentity {
   name: string;
   accountId: string;
@@ -47,6 +52,9 @@ interface AgentIdentity {
   profileTopicId?: string;
 }
 
+/**
+ * Structure for HCS messages received from the network
+ */
 export interface HCSMessage {
   op?: string;
   sequence_number?: number;
@@ -59,6 +67,7 @@ export interface HCSMessage {
 }
 
 // --- Configuration ---
+// Agent personality template used for AI interactions
 const AGENT_PERSONALITY = `You are a helpful assistant managing Hedera HCS-10 connections and messages.
 You have access to tools for registering agents, finding registered agents, initiating connections, listing active connections, sending messages over connections, and checking for new messages.
 The current agent you are operating as is configured via environment variables (OPERATOR_ID), but can switch if a new agent is registered.
@@ -164,6 +173,7 @@ When users ask about charts or price history:
 
 Remember the connection numbers when listing connections, as users might refer to them.`;
 
+// Initial welcome message sent to new connections
 const WELCOME_MESSAGE = `Hello! I'm your SauceSwap assistant. I can help you with:
 
 🔍 Exploring SauceSwap Pools:
@@ -202,25 +212,27 @@ To get started, you can ask me about:
 I'm here to help! 🚀`;
 
 // --- Global Variables ---
-let hcsClient: HCS10Client;
-let stateManager: IStateManager;
-let agentExecutor: AgentExecutor | null = null;
-let memory: ConversationTokenBufferMemory;
-let connectionMonitor: ConnectionTool | null = null;
-let connectionMonitorTool: ConnectionMonitorTool | null = null;
-let tools: StructuredToolInterface[] = [];
+let hcsClient: HCS10Client; // Primary HCS client for message processing
+let stateManager: IStateManager; // Manages agent state and connections
+let agentExecutor: AgentExecutor | null = null; // LangChain agent executor
+let memory: ConversationTokenBufferMemory; // Conversation memory for context retention
+let connectionMonitor: ConnectionTool | null = null; // Tool for connection monitoring
+let connectionMonitorTool: ConnectionMonitorTool | null = null; // Enhanced monitoring tool
+let tools: StructuredToolInterface[] = []; // Collection of available tools for the agent
 
 // Plugin system state
-let pluginRegistry: PluginRegistry | null = null;
-let pluginContext: PluginContext | null = null;
+let pluginRegistry: PluginRegistry | null = null; // Registry of available plugins
+let pluginContext: PluginContext | null = null; // Context shared across plugins
 
-// Message tracking state
-const processedMessages: Map<string, Set<number>> = new Map();
-const messagesInProcess: Map<string, Set<number>> = new Map();
-const lastProcessedTimestamps: Map<string, number> = new Map();
+// Message tracking state to prevent duplicate processing
+const processedMessages: Map<string, Set<number>> = new Map(); // Tracks already processed messages by topic
+const messagesInProcess: Map<string, Set<number>> = new Map(); // Tracks messages currently being processed
+const lastProcessedTimestamps: Map<string, number> = new Map(); // Tracks last processed timestamp by topic
 
 /**
  * Loads agent details from environment variables using a specified prefix
+ * @param prefix The environment variable prefix (e.g., 'TODD', 'ALICE')
+ * @returns Agent identity object or null if incomplete configuration
  */
 async function loadAgentFromEnv(prefix: string): Promise<AgentIdentity | null> {
   const accountId = process.env[`${prefix}_ACCOUNT_ID`];
@@ -246,6 +258,8 @@ async function loadAgentFromEnv(prefix: string): Promise<AgentIdentity | null> {
 
 /**
  * Displays available agents and prompts user to select one
+ * @param agents List of available agent identities
+ * @returns Selected agent or null if none available
  */
 async function promptUserToSelectAgent(
   agents: AgentIdentity[]
@@ -294,7 +308,8 @@ async function promptUserToSelectAgent(
 
 /**
  * Initializes message tracking for all established connections
- * Sets up the maps to track processed messages and message timestamps
+ * Creates data structures for tracking processed messages and timestamps
+ * Pre-populates with messages sent by the current agent
  */
 async function initializeMessageTracking() {
   console.log('Initializing message tracking system...');
@@ -357,8 +372,10 @@ async function initializeMessageTracking() {
 }
 
 /**
- * Handles processing and responding to incoming messages
- * Added safeguards and improved error handling
+ * Processes incoming messages and generates responses using the AI agent
+ * Handles message deduplication, JSON parsing, timeout protection, and error recovery
+ * @param message The HCS message to process
+ * @param topicId The Hedera topic ID where the message was received
  */
 async function handleIncomingMessage(message: HCSMessage, topicId: string) {
   // Initialize sequence number with default value
@@ -370,13 +387,13 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       return;
     }
 
-    // Skip messages from self
+    // Skip messages from self to prevent feedback loops
     if (message.operator_id && message.operator_id.includes(hcsClient.getOperatorId())) {
       console.log(`Skipping own message #${sequenceNumber}`);
       return;
     }
 
-    // Validate that topicId has the expected format (0.0.XXXXX)
+    // Validate topic ID format for security
     if (!topicId.match(/^0\.0\.[0-9]+$/)) {
       console.error(`Invalid conversation topic ID format: ${topicId}`);
       return;
@@ -384,21 +401,20 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
 
     console.log(`Processing message #${sequenceNumber} in topic ${topicId}: ${message.data.substring(0, 100)}${message.data.length > 100 ? '...' : ''}`);
 
-    // Get or initialize the processed messages set for this topic
+    // Get or initialize tracking sets for this topic
     let processedSet = processedMessages.get(topicId);
     if (!processedSet) {
       processedSet = new Set<number>();
       processedMessages.set(topicId, processedSet);
     }
 
-    // Get or initialize the in-process messages set for this topic
     let inProcessSet = messagesInProcess.get(topicId);
     if (!inProcessSet) {
       inProcessSet = new Set<number>();
       messagesInProcess.set(topicId, inProcessSet);
     }
 
-    // Check if message was already processed or is being processed
+    // Skip already processed or in-progress messages
     if (processedSet.has(sequenceNumber)) {
       console.log(`Skipping already processed message #${sequenceNumber}`);
       return;
@@ -409,12 +425,12 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       return;
     }
 
-    // Mark message as in process
+    // Mark message as in process to prevent duplicate processing
     inProcessSet.add(sequenceNumber);
 
+    // Parse JSON messages for better formatting if possible
     let messageText = message.data;
     try {
-      // Try to parse JSON if the message is JSON
       if (messageText.startsWith('{') || messageText.startsWith('[')) {
         const jsonData = JSON.parse(messageText);
         if (typeof jsonData === 'object') {
@@ -422,26 +438,25 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
         }
       }
     } catch (error) {
-      // If not valid JSON, use raw text
       console.debug('Message is not JSON, using raw text');
     }
 
-    // Check if agentExecutor is initialized
+    // Check if agent is ready
     if (!agentExecutor) {
       console.error('Agent executor not initialized');
       inProcessSet.delete(sequenceNumber);
       return;
     }
 
-    // Process message with timeout protection
-    const timeoutMs = 120000; // 2 minutes timeout (increased from 1 minute)
+    // Process message with timeout protection (2 minutes)
+    const timeoutMs = 120000;
     const timeoutPromise = new Promise<{output: string}>((_, reject) => {
       setTimeout(() => reject(new Error('Processing timeout')), timeoutMs);
     });
     
+    // Race the agent processing against timeout to prevent hanging
     let response;
     try {
-      // Race the agent processing against a timeout
       response = await Promise.race([
         agentExecutor.invoke({
           input: messageText,
@@ -454,12 +469,12 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       throw processingError; // Rethrow to be handled in outer catch
     }
 
-    // Extract just the output string from the response
+    // Extract response text from agent output
     const outputText = typeof response.output === 'string' 
       ? response.output 
       : response.output?.output || response.output?.text || JSON.stringify(response.output);
 
-    // Get the SendMessageTool
+    // Find SendMessageTool for sending responses
     const sendMessageTool = tools.find(t => t instanceof SendMessageTool) as SendMessageTool;
     if (!sendMessageTool) {
       console.error('SendMessageTool not found in tools array');
@@ -467,19 +482,19 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       return;
     }
 
-    // Check if the response contains an HRL link
+    // Special handling for HRL image links (e.g., candlestick charts)
+    // HRL format: hcs://1/0.0.XXXXX
     const hrlRegex = /(hcs:\/\/1\/(?:0\.0\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+))/i;
     const hrlMatch = outputText.match(hrlRegex);
     
-    // Special handling for HRL links (images)
     if (hrlMatch && hrlMatch[1]) {
       const hrlLink = hrlMatch[1];
       console.log(`Found HRL link in response: ${hrlLink}`);
       
-      // Validate the conversation topicId (not the HRL topic)
+      // Double-check topic ID format before sending
       if (!topicId.match(/^0\.0\.[0-9]+$/)) {
         console.error(`Invalid conversation topic ID format: ${topicId} when sending HRL link`);
-        // Fall back to normal response if topicId is invalid
+        // Fall back to normal message if topic ID is invalid
         await sendMessageTool.invoke({
           topicId: topicId,
           message: `[Reply to #${sequenceNumber}] ${outputText}`,
@@ -492,7 +507,8 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       console.log(`Will send HRL image ${hrlLink} to conversation topic ${topicId}`);
       
       try {
-        // Step 1: Send only the HRL link for rendering
+        // Two-step process for HRL images:
+        // 1: Send the HRL link for rendering in OpenConvAI
         await sendMessageTool.invoke({
           topicId: topicId,
           message: hrlLink,
@@ -501,8 +517,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
         });
         console.log(`Sent HRL image for rendering: ${hrlLink}`);
         
-        // Step 2: Send a text message with any context
-        // Remove the HRL link from the text to avoid duplication
+        // 2: Send text description separately (without the HRL link)
         let textResponse = outputText.replace(hrlLink, "").trim();
         if (!textResponse) {
           textResponse = `Gráfico generado para el pool`;
@@ -517,7 +532,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
         console.log(`Sent text response separately`);
       } catch (error) {
         console.error(`Error sending HRL and text messages: ${error}`);
-        // If there's an error with the special handling, fall back to normal response
+        // Fall back to normal response if special handling fails
         await sendMessageTool.invoke({
           topicId: topicId,
           message: `[Reply to #${sequenceNumber}] ${outputText}`,
@@ -526,7 +541,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
         });
       }
     } else {
-      // Normal message (no HRL link)
+      // Standard text response (no HRL link)
       await sendMessageTool.invoke({
         topicId: topicId,
         message: `[Reply to #${sequenceNumber}] ${outputText}`,
@@ -536,11 +551,12 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       console.log(`Sent regular response to message #${sequenceNumber}`);
     }
 
-    // Mark message as processed AFTER successful processing
+    // Mark message as successfully processed
     if (processedSet) {
       processedSet.add(sequenceNumber);
     }
     
+    // Update last processed timestamp
     if (message.created) {
       lastProcessedTimestamps.set(topicId, message.created.getTime());
     }
@@ -548,7 +564,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
   } catch (error) {
     console.error(`Error processing message #${sequenceNumber}:`, error);
     
-    // Try to send error message
+    // Try to send error notification to user
     try {
       const sendMessageTool = tools.find(t => t instanceof SendMessageTool) as SendMessageTool;
       if (sendMessageTool) {
@@ -563,7 +579,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
       console.error('Failed to send error message:', sendError);
     }
 
-    // Mark message as processed even if it failed
+    // Mark as processed even if failed to prevent retry loops
     let errorProcessedSet = processedMessages.get(topicId);
     if (!errorProcessedSet) {
       errorProcessedSet = new Set<number>();
@@ -571,7 +587,7 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
     }
     errorProcessedSet.add(sequenceNumber);
   } finally {
-    // Always remove from in-process set
+    // Always remove from in-process set regardless of outcome
     let inProcessSet = messagesInProcess.get(topicId);
     if (inProcessSet) {
       inProcessSet.delete(sequenceNumber);
@@ -580,26 +596,29 @@ async function handleIncomingMessage(message: HCSMessage, topicId: string) {
 }
 
 /**
- * Checks for and processes new messages from all established connections
- * Added batch processing and improved filtering
+ * Periodically checks for and processes new messages from all established connections
+ * Implements batch processing and filtering to prevent overloading the system
+ * Limits the number of messages processed in each cycle
  */
 async function checkForNewMessages() {
+  // Get only established connections
   const connections = stateManager
     .listConnections()
     .filter((conn) => conn.status === 'established');
     
-  // Track how many messages we're processing in this batch
+  // Track message processing with batch limits
   let messagesBatchCount = 0;
   const MAX_BATCH_SIZE = 5; // Process at most 5 messages per check cycle
 
   for (const conn of connections) {
-    // Stop processing if we've hit our batch limit
+    // Stop if batch limit reached to prevent processing overload
     if (messagesBatchCount >= MAX_BATCH_SIZE) {
       console.log(`Reached batch processing limit (${MAX_BATCH_SIZE}), will process remaining messages in next cycle`);
       break;
     }
     
     const topicId = conn.connectionTopicId;
+    // Validate topic ID format for security
     if (!topicId.match(/^[0-9]+\.[0-9]+\.[0-9]+$/)) {
       console.warn(`Skipping invalid topic ID format: ${topicId}`);
       continue;
@@ -614,21 +633,26 @@ async function checkForNewMessages() {
         messagesInProcess.set(topicId, new Set<number>());
       }
       if (!lastProcessedTimestamps.has(topicId)) {
+        // Default to 24 hours ago if no timestamp exists
         lastProcessedTimestamps.set(topicId, Date.now() - 24 * 60 * 60 * 1000);
       }
       
-      // Get the last processed timestamp for this topic
+      // Get the last timestamp we processed for this topic
       const lastTimestamp = lastProcessedTimestamps.get(topicId) || 0;
 
-      // Get messages from the topic
+      // Fetch message history from Hedera
       const messages = await hcsClient.getMessageStream(topicId);
       
-      // Sort messages by sequence number to process in order
+      // Sort by sequence number to process in chronological order
       const sortedMessages = [...messages.messages].sort(
         (a, b) => (a.sequence_number || 0) - (b.sequence_number || 0)
       );
       
-      // Filter for new, unprocessed messages
+      // Filter for messages that need processing:
+      // - Must be of type 'message'
+      // - Must be newer than last processed timestamp
+      // - Must not be from self
+      // - Must not be already processed or in processing
       const newMessages = sortedMessages.filter(
         (m) =>
           m.sequence_number !== undefined && 
@@ -645,7 +669,7 @@ async function checkForNewMessages() {
         console.log(`Found ${newMessages.length} new messages for topic ${topicId}`);
       }
       
-      // Process messages in this connection up to the batch limit
+      // Process messages up to the batch limit
       for (const message of newMessages) {
         if (messagesBatchCount >= MAX_BATCH_SIZE) {
           break;
@@ -666,7 +690,8 @@ async function checkForNewMessages() {
 
 /**
  * Sends a welcome message to a newly established connection
- * Only if there is no previous message history
+ * Only sends if there is no previous message history in the topic
+ * @param topicId The Hedera topic ID for the connection
  */
 async function sendWelcomeMessage(topicId: string) {
   try {
@@ -695,7 +720,10 @@ async function sendWelcomeMessage(topicId: string) {
   }
 }
 
-// --- Initialization ---
+/**
+ * Initializes the agent with HCS clients, tools, plugins, and LangChain components
+ * Sets up the agent identity, state manager, and communication channels
+ */
 async function initialize() {
   console.log('Initializing HCS-10 LangChain Agent...');
   try {
@@ -944,6 +972,10 @@ async function initialize() {
   }
 }
 
+/**
+ * Starts the interactive console mode for direct user-agent interaction
+ * Processes user input and displays agent responses in the terminal
+ */
 async function startConsoleMode() {
   console.log('\nStarting console mode...');
   console.log('Type your messages and press Enter to send. Type "exit" to quit.\n');
@@ -983,46 +1015,48 @@ async function startConsoleMode() {
 }
 
 /**
- * Starts automated HCS-10 monitoring mode
- * Improved with proper interval management and throttling
+ * Starts automated HCS-10 monitoring mode for continuous operation
+ * Sets up interval-based connection monitoring and message processing
+ * Implements rate limiting and throttling to prevent API overloads
  */
 async function startAutomatedMode() {
   console.log('\nStarting automated HCS-10 monitoring mode...');
   
-  // Initialize message tracking
+  // Set up message tracking system
   await initializeMessageTracking();
   
-  // Track established connections to avoid checking welcome status repeatedly
+  // Track connections that have received welcome messages
   const checkedWelcomeForConnections = new Set<string>();
   
-  // Track when we last checked for messages to prevent overloading
+  // State for rate limiting and throttling
   let lastCheckTime = Date.now();
   let isProcessing = false;
   
-  // Minimum time between processing cycles (in ms)
-  const MIN_CHECK_INTERVAL = 5000; // 5 seconds minimum between checks
-  const CONNECTION_CHECK_INTERVAL = 10000; // 10 seconds for connection monitoring
+  // Interval settings for different operations
+  const MIN_CHECK_INTERVAL = 5000; // 5 seconds minimum between message checks
+  const CONNECTION_CHECK_INTERVAL = 10000; // 10 seconds between connection scans
   
   let connectionMonitorInterval: NodeJS.Timeout;
   let messageCheckInterval: NodeJS.Timeout;
   
-  // Set up connection monitoring on an interval
+  // Set up periodic connection monitoring
   connectionMonitorInterval = setInterval(async () => {
     try {
       if (connectionMonitorTool) {
+        // Monitor for new connection requests
         const monitorResult = await connectionMonitorTool.invoke({
           acceptAll: true,
-          monitorDurationSeconds: 3, // Reduced from 5 to 3 seconds
+          monitorDurationSeconds: 3, // Short duration to keep the agent responsive
         });
 
-        // Check for newly established connections
+        // Check for newly established connections to send welcome messages
         const connections = stateManager
           .listConnections()
           .filter((conn) => conn.status === 'established');
 
         for (const conn of connections) {
           const topicId = conn.connectionTopicId;
-          // Only check welcome status once per connection per session
+          // Only check welcome status once per connection to avoid duplicate welcomes
           if (!checkedWelcomeForConnections.has(topicId)) {
             await sendWelcomeMessage(topicId);
             checkedWelcomeForConnections.add(topicId);
@@ -1034,9 +1068,9 @@ async function startAutomatedMode() {
     }
   }, CONNECTION_CHECK_INTERVAL);
   
-  // Set up message checking on a separate interval
+  // Set up periodic message checking with throttling
   messageCheckInterval = setInterval(async () => {
-    // Skip if we're already processing messages or it's too soon
+    // Skip if already processing or checked too recently
     if (isProcessing || (Date.now() - lastCheckTime) < MIN_CHECK_INTERVAL) {
       return;
     }
@@ -1050,11 +1084,11 @@ async function startAutomatedMode() {
     } finally {
       isProcessing = false;
     }
-  }, 3000); // Check every 3 seconds, but actual checks are throttled by MIN_CHECK_INTERVAL
+  }, 3000); // Check frequently but actual execution is throttled
   
   console.log('Automated monitoring active. Press Ctrl+C to exit.');
   
-  // Set up cleanup on process exit
+  // Clean up on process termination
   process.on('SIGINT', () => {
     console.log('\nShutting down monitoring...');
     clearInterval(connectionMonitorInterval);
@@ -1063,6 +1097,10 @@ async function startAutomatedMode() {
   });
 }
 
+/**
+ * Prompts the user to select the agent's operation mode
+ * @returns Selected mode ('console' or 'automated')
+ */
 async function promptForMode(): Promise<'console' | 'automated'> {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -1088,7 +1126,10 @@ async function promptForMode(): Promise<'console' | 'automated'> {
   });
 }
 
-// --- Main Execution ---
+/**
+ * Main function - initializes the agent and starts the selected operation mode
+ * Handles initialization errors and orchestrates the agent lifecycle
+ */
 async function main() {
   console.log('Starting initialization...');
   await initialize();
