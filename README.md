@@ -486,8 +486,4 @@ The architecture allows several extensions:
 
 ## Conclusion
 
-<<<<<<< HEAD
 This project demonstrates how to integrate LangChain with the HCS-10 standard to create autonomous agents that interact with DeFi data on Hedera. The modular plugin architecture allows easy extension of functionality, as showcased by the SauceSwap plugins, particularly the sophisticated chart generation capabilities. 
-=======
-This project demonstrates how to integrate LangChain with the HCS-10 standard to create autonomous agents that interact with DeFi data on Hedera. The modular plugin architecture allows easy extension of functionality, as showcased by the SauceSwap plugins, particularly the sophisticated chart generation capabilities. 
->>>>>>> 8280fd7d34ecf6051617704e4460163b84dbdc45
