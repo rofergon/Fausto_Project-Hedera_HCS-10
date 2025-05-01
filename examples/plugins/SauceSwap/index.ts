@@ -4,6 +4,7 @@ import { GetSauceSwapPoolsTool } from './get_sauceswap_pools';
 import { GetSauceSwapPoolDetailsTool } from './get_sauceswap_pool_details';
 import { GetSauceSwapTokenDetailsTool } from './get_sauceswap_token_details';
 import { GetSauceSwapAssociatedPoolsTool } from './get_sauceswap_associated_pools';
+import { GetSauceSwapChartTool } from './CandlestickPlugin';
 
 /**
  * SauceSwap Plugin for the Standards Agent Kit
@@ -16,8 +17,23 @@ export default class SauceSwapPlugin extends BasePlugin {
   version = '1.0.0';
   author = 'Standards Agent Kit';
   
+  private network: 'mainnet' | 'testnet' = 'mainnet';
+  private chartOutputDir: string = './charts';
+  private chartTool: GetSauceSwapChartTool | null = null;
+  
   async initialize(context: PluginContext): Promise<void> {
     await super.initialize(context);
+    this.network = context.config?.network || 'mainnet';
+    this.chartOutputDir = context.config?.chartOutputDir || './charts';
+    
+    // Create chart tool with client for Hedera inscriptions
+    this.chartTool = new GetSauceSwapChartTool(this.network, this.chartOutputDir);
+    
+    // Pass the HCS10Client to the tool so it can access credentials
+    if (context.client) {
+      this.chartTool.setClient(context.client);
+    }
+    
     this.context.logger.info('SauceSwap Plugin initialized - Using mainnet by default');
   }
   
@@ -26,7 +42,8 @@ export default class SauceSwapPlugin extends BasePlugin {
       new GetSauceSwapPoolsTool(),
       new GetSauceSwapPoolDetailsTool(),
       new GetSauceSwapTokenDetailsTool(),
-      new GetSauceSwapAssociatedPoolsTool()
+      new GetSauceSwapAssociatedPoolsTool(),
+      this.chartTool || new GetSauceSwapChartTool(this.network, this.chartOutputDir)
     ];
   }
 } 

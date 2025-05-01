@@ -1,3 +1,17 @@
+/**
+ * This tool fetches detailed information about a SauceSwap pool by ID.
+ * 
+ * The response format has been optimized to:
+ * 1. Use dynamic keys for tokens based on their symbols ([tokenA.symbol], [tokenB.symbol])
+ * 2. Create a simple "pair" field that shows the trading pair (e.g., "HBAR-USDC")
+ * 3. Remove redundant information like token names and decimals that aren't needed
+ *    for most use cases
+ * 4. Flatten nested structures where possible to make data more accessible
+ * 
+ * This keeps all important trading information while reducing payload size and
+ * making it easier for the AI to understand the pool structure.
+ */
+
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import axios, { AxiosError } from 'axios';
@@ -53,39 +67,33 @@ export class GetSauceSwapPoolDetailsTool extends StructuredTool {
 
       const response = await axios.get<PoolDetails>(`${baseUrl}/pools/${input.poolId}`);
       const pool = response.data;
-
-      return JSON.stringify({
-        poolId: pool.id,
+      
+      const result = JSON.stringify({
+        id: pool.id,
         contractId: pool.contractId,
+        pair: `${pool.tokenA.symbol}-${pool.tokenB.symbol}`,
         lpToken: {
-          id: pool.lpToken.id,
-          name: pool.lpToken.name,
           symbol: pool.lpToken.symbol,
-          decimals: pool.lpToken.decimals,
           priceUsd: pool.lpToken.priceUsd,
           totalReserve: pool.lpTokenReserve
         },
-        tokenA: {
-          id: pool.tokenA.id,
-          name: pool.tokenA.name,
-          symbol: pool.tokenA.symbol,
-          decimals: pool.tokenA.decimals,
-          priceUsd: pool.tokenA.priceUsd,
-          reserve: pool.tokenReserveA,
-          website: pool.tokenA.website,
-          description: pool.tokenA.description
-        },
-        tokenB: {
-          id: pool.tokenB.id,
-          name: pool.tokenB.name,
-          symbol: pool.tokenB.symbol,
-          decimals: pool.tokenB.decimals,
-          priceUsd: pool.tokenB.priceUsd,
-          reserve: pool.tokenReserveB,
-          website: pool.tokenB.website,
-          description: pool.tokenB.description
+        tokens: {
+          [pool.tokenA.symbol]: {
+            id: pool.tokenA.id,
+            priceUsd: pool.tokenA.priceUsd,
+            reserve: pool.tokenReserveA,
+            website: pool.tokenA.website
+          },
+          [pool.tokenB.symbol]: {
+            id: pool.tokenB.id,
+            priceUsd: pool.tokenB.priceUsd,
+            reserve: pool.tokenReserveB,
+            website: pool.tokenB.website
+          }
         }
       }, null, 2);
+      
+      return `Pool ${pool.id} (${pool.tokenA.symbol}-${pool.tokenB.symbol}) details:\n\n${result}\n\nUse command "list pools" to see all available pools.`;
     } catch (error) {
       console.error('[GetSauceSwapPoolDetailsTool] Error:', error);
       

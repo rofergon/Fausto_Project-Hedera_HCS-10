@@ -1,0 +1,12 @@
+{
+  "id": "sauceswap-candlestick",
+  "name": "SauceSwap Candlestick Plugin",
+  "description": "Provides tools to access SauceSwap candlestick data",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "main": "index.ts",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "zod": "^3.22.0"
+  }
+} 

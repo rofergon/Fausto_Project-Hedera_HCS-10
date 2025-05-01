@@ -9,19 +9,17 @@ import { Logger } from '@hashgraphonline/standards-sdk';
  */
 export class SendMessageTool extends StructuredTool {
   name = 'send_message';
-  description =
-    'Sends a message to a specified Hedera topic using HCS-10 and monitors for responses.';
+  description = 'Send a message to a topic';
   private client: HCS10Client;
   private lastProcessedTimestamp: number = 0;
   private logger: Logger;
 
   schema = z.object({
-    topicId: z.string().describe('The Hedera topic ID to send the message to'),
-    message: z.string().describe('The message content to send'),
-    disableMonitoring: z
-      .boolean()
-      .optional()
-      .describe('Whether to disable monitoring for responses'),
+    topicId: z.string().describe('The topic ID to send the message to'),
+    message: z.string().describe('The message to send'),
+    memo: z.string().optional().describe('An optional memo for the message'),
+    disableMonitoring: z.boolean().optional().describe('Disable message monitoring for this message'),
+    isHrl: z.boolean().optional().describe('If true, the message is treated as an HRL and will be sent as a raw HCS-10 message')
   });
 
   /**
@@ -30,40 +28,50 @@ export class SendMessageTool extends StructuredTool {
   constructor(client: HCS10Client) {
     super();
     this.client = client;
-    this.logger = Logger.getInstance({ module: 'SendMessageTool' });
+    this.logger = new Logger({ module: 'SendMessageTool' });
   }
 
   /**
    * Calls sendMessage() with the provided parameters.
    */
-  async _call(input: {
-    topicId: string;
-    message: string;
-    disableMonitoring: boolean;
-  }): Promise<string> {
+  async _call(input: z.infer<typeof this.schema>): Promise<string> {
     try {
+      // Check if this is an HRL message for OpenConvAI rendering
+      if (input.isHrl === true && input.message.startsWith('hcs://')) {
+        // For OpenConvAI to render images properly:
+        // 1. Send just the HRL as the message
+        const result = await this.client.sendMessage(
+          input.topicId,
+          input.message,  // Only the HRL as the message
+          input.memo || "Image from SauceSwap chart"
+        );
+
+        // 2. Then optionally send the descriptive text in a separate message
+        if (input.memo) {
+          await this.client.sendMessage(
+            input.topicId,
+            input.memo,
+            "Additional details"
+          );
+        }
+        
+        return `HRL image sent successfully. The image will render in OpenConvAI viewers.`;
+      }
+      
+      // Standard message handling
       const result = await this.client.sendMessage(
         input.topicId,
-        input.message
+        input.message,
+        input.memo
       );
-      if (!result) {
-        throw new Error('Failed to send message');
-      }
-      this.logger.info(`Message sent with sequence number ${result}`);
-      if (!input.disableMonitoring) {
-        const response = await this.monitorResponses(input.topicId, result);
-        return `Successfully sent message to topic ${input.topicId}${
-          response ? `\nResponse: ${response}` : ''
-        }`;
+      
+      if (result) {
+        return `Message sent with sequence number ${result}`;
       } else {
-        return `Successfully sent message to topic ${input.topicId}`;
+        return 'Message sent';
       }
     } catch (error) {
-      throw new Error(
-        `Failed to send message: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      return `Error sending message: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
