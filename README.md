@@ -4,6 +4,7 @@
 
 This project implements an AI agent that uses LangChain to interact with SauceSwap v2 data on the Hedera network. The agent can display information about pools, tokens, and generate real-time historical price charts, analyze data, and provide recommendations to users regarding the consulted information, or explain to users how they can interpret this information.
 
+https://moonscape.tech/openconvai/chat?topicId=0.0.5932183  
 https://moonscape.tech/openconvai/chat?topicId=0.0.5931232
 
 ## Main Features
